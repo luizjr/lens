@@ -33,14 +33,17 @@ export * from "./camelCase";
 export * from "./cloneJson";
 export * from "./cluster-id-url-parsing";
 export * from "./collection-functions";
+export * from "./convertCpu";
+export * from "./convertMemory";
 export * from "./debouncePromise";
 export * from "./defineGlobal";
 export * from "./delay";
 export * from "./disposer";
 export * from "./downloadFile";
-export * from "./formatDuration";
 export * from "./escapeRegExp";
+export * from "./formatDuration";
 export * from "./getPath";
+export * from "./getRandId";
 export * from "./hash-set";
 export * from "./local-kubeconfig";
 export * from "./n-fircate";
@@ -54,8 +57,6 @@ export * from "./tar";
 export * from "./toJS";
 export * from "./type-narrowing";
 export * from "./types";
-export * from "./convertMemory";
-export * from "./convertCpu";
 
 import * as iter from "./iter";
 
