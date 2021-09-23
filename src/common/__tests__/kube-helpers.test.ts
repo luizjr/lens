@@ -120,14 +120,6 @@ describe("kube helpers", () => {
           );
         });
       });
-
-      describe("with invalid exec command", () => {
-        it("returns an error", () => {
-          expect(String(validateKubeConfig(kc, "invalidExec"))).toEqual(
-            expect.stringContaining("User Exec command \"foo\" not found on host. Please ensure binary is found in PATH or use absolute path to binary in Kubeconfig")
-          );
-        });
-      });
     });
   });
 
