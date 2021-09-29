@@ -149,16 +149,16 @@ export class StorageHelper<T> {
   }
 
   @action
-  merge(value: Partial<T> | ((draft: Draft<T>) => Partial<T> | void)) {
+  merge(value: Partial<T> | ((draft: Draft<T>) => Draft<T> | void)) {
     const nextValue = produce(this.toJSON(), (state: Draft<T>) => {
-      const newValue = isFunction(value) ? value(state) : value;
+      const newValue = (isFunction(value) ? value(state) : value) as Draft<T>;
 
       return isPlainObject(newValue)
         ? Object.assign(state, newValue) // partial updates for returned plain objects
         : newValue;
     });
 
-    this.set(nextValue as T);
+    this.set(nextValue);
   }
 
   toJSON(): T {
