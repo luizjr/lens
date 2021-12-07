@@ -119,7 +119,15 @@ export interface ClusterPrometheusPreferences {
 export enum ClusterStatus {
   AccessGranted = 2,
   AccessDenied = 1,
-  Offline = 0
+  Offline = 0,
+}
+
+/**
+ * The message format for the "cluster:<cluster-id>:connection-update" channels
+ */
+export interface KubeAuthUpdate {
+  message: string;
+  isError: boolean;
 }
 
 /**
@@ -131,7 +139,7 @@ export enum ClusterMetadataKey {
   DISTRIBUTION = "distribution",
   NODES_COUNT = "nodes",
   LAST_SEEN = "lastSeen",
-  PROMETHEUS = "prometheus"
+  PROMETHEUS = "prometheus",
 }
 
 /**
@@ -173,7 +181,6 @@ export interface ClusterState {
   disconnected: boolean;
   accessible: boolean;
   ready: boolean;
-  failureReason: string;
   isAdmin: boolean;
   allowedNamespaces: string[]
   allowedResources: string[]

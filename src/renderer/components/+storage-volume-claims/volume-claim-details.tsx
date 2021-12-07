@@ -37,6 +37,7 @@ import { ClusterMetricsResourceType } from "../../../common/cluster-types";
 import { KubeObjectMeta } from "../kube-object-meta";
 import { getDetailsUrl } from "../kube-detail-params";
 import { boundMethod } from "../../utils";
+import logger from "../../../common/logger";
 
 interface Props extends KubeObjectDetailsProps<PersistentVolumeClaim> {
 }
@@ -50,10 +51,13 @@ export class PersistentVolumeClaimDetails extends React.Component<Props> {
     makeObservable(this);
   }
 
-  @disposeOnUnmount
-  clean = reaction(() => this.props.object, () => {
-    this.metrics = null;
-  });
+  componentDidMount() {
+    disposeOnUnmount(this, [
+      reaction(() => this.props.object, () => {
+        this.metrics = null;
+      }),
+    ]);
+  }
 
   @boundMethod
   async loadMetrics() {
@@ -68,11 +72,18 @@ export class PersistentVolumeClaimDetails extends React.Component<Props> {
     if (!volumeClaim) {
       return null;
     }
+
+    if (!(volumeClaim instanceof PersistentVolumeClaim)) {
+      logger.error("[PersistentVolumeClaimDetails]: passed object that is not an instanceof PersistentVolumeClaim", volumeClaim);
+
+      return null;
+    }
+
     const { storageClassName, accessModes } = volumeClaim.spec;
     const { metrics } = this;
     const pods = volumeClaim.getPods(podsStore.items);
     const metricTabs = [
-      "Disk"
+      "Disk",
     ];
     const isMetricHidden = getActiveClusterEntity()?.isMetricHidden(ClusterMetricsResourceType.VolumeClaim);
 

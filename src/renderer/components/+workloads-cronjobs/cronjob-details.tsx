@@ -23,7 +23,7 @@ import "./cronjob-details.scss";
 
 import React from "react";
 import kebabCase from "lodash/kebabCase";
-import { observer } from "mobx-react";
+import { disposeOnUnmount, observer } from "mobx-react";
 import { DrawerItem, DrawerTitle } from "../drawer";
 import { Badge } from "../badge/badge";
 import { jobStore } from "../+workloads-jobs/job.store";
@@ -31,33 +31,48 @@ import { Link } from "react-router-dom";
 import { cronJobStore } from "./cronjob.store";
 import type { KubeObjectDetailsProps } from "../kube-object-details";
 import { getDetailsUrl } from "../kube-detail-params";
-import type { CronJob, Job } from "../../../common/k8s-api/endpoints";
+import { CronJob, Job } from "../../../common/k8s-api/endpoints";
 import { KubeObjectMeta } from "../kube-object-meta";
+import logger from "../../../common/logger";
+import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
 
 interface Props extends KubeObjectDetailsProps<CronJob> {
 }
 
 @observer
 export class CronJobDetails extends React.Component<Props> {
-  async componentDidMount() {
-    jobStore.reloadAll();
+  componentDidMount() {
+    disposeOnUnmount(this, [
+      kubeWatchApi.subscribeStores([
+        jobStore,
+      ]),
+    ]);
   }
 
   render() {
     const { object: cronJob } = this.props;
 
-    if (!cronJob) return null;
+    if (!cronJob) {
+      return null;
+    }
+
+    if (!(cronJob instanceof CronJob)) {
+      logger.error("[CronJobDetails]: passed object that is not an instanceof CronJob", cronJob);
+
+      return null;
+    }
+
     const childJobs = jobStore.getJobsByOwner(cronJob);
 
     return (
       <div className="CronJobDetails">
         <KubeObjectMeta object={cronJob}/>
         <DrawerItem name="Schedule">
-          {cronJob.isNeverRun() ? (
-            <>
-              never ({cronJob.getSchedule()})
-            </>
-          ) : cronJob.getSchedule()}
+          {
+            cronJob.isNeverRun()
+              ? `never (${cronJob.getSchedule()})`
+              : cronJob.getSchedule()
+          }
         </DrawerItem>
         <DrawerItem name="Active">
           {cronJobStore.getActiveJobsNum(cronJob)}

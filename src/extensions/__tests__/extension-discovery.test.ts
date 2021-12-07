@@ -26,25 +26,37 @@ import path from "path";
 import { ExtensionDiscovery } from "../extension-discovery";
 import os from "os";
 import { Console } from "console";
+import { AppPaths } from "../../common/app-paths";
 
 jest.setTimeout(60_000);
 
 jest.mock("../../common/ipc");
 jest.mock("chokidar", () => ({
-  watch: jest.fn()
+  watch: jest.fn(),
 }));
 jest.mock("../extension-installer", () => ({
   extensionInstaller: {
     extensionPackagesRoot: "",
-    installPackage: jest.fn()
-  }
+    installPackage: jest.fn(),
+  },
 }));
 jest.mock("electron", () => ({
   app: {
+    getVersion: () => "99.99.99",
+    getName: () => "lens",
+    setName: jest.fn(),
+    setPath: jest.fn(),
     getPath: () => "tmp",
+    getLocale: () => "en",
     setLoginItemSettings: jest.fn(),
   },
+  ipcMain: {
+    on: jest.fn(),
+    handle: jest.fn(),
+  },
 }));
+
+AppPaths.init();
 
 console = new Console(process.stdout, process.stderr); // fix mockFS
 const mockedWatch = watch as jest.MockedFunction<typeof watch>;
@@ -60,7 +72,7 @@ describe("ExtensionDiscovery", () => {
     beforeEach(() => {
       mockFs({
         [`${os.homedir()}/.k8slens/extensions/my-extension/package.json`]: JSON.stringify({
-          name: "my-extension"
+          name: "my-extension",
         }),
       });
     });
@@ -79,11 +91,11 @@ describe("ExtensionDiscovery", () => {
           }
 
           return mockWatchInstance;
-        })
+        }),
       };
 
       mockedWatch.mockImplementationOnce(() =>
-        (mockWatchInstance) as any
+        (mockWatchInstance) as any,
       );
 
       const extensionDiscovery = ExtensionDiscovery.createInstance();
@@ -122,11 +134,11 @@ describe("ExtensionDiscovery", () => {
         }
 
         return mockWatchInstance;
-      })
+      }),
     };
 
     mockedWatch.mockImplementationOnce(() =>
-      (mockWatchInstance) as any
+      (mockWatchInstance) as any,
     );
     const extensionDiscovery = ExtensionDiscovery.createInstance();
 

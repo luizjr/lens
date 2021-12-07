@@ -21,10 +21,10 @@
 
 import fse from "fs-extra";
 import path from "path";
-import { getPath } from "../../common/utils/getPath";
+import { AppPaths } from "../../common/app-paths";
 
 export function fileNameMigration() {
-  const userDataPath = getPath("userData");
+  const userDataPath = AppPaths.get("userData");
   const configJsonPath = path.join(userDataPath, "config.json");
   const lensUserStoreJsonPath = path.join(userDataPath, "lens-user-store.json");
 

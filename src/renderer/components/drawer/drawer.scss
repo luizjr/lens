@@ -21,15 +21,14 @@
 
 
 .Drawer {
-  --size: 50%;
-  --full-size: 75%;
   --spacing: #{$padding * 3};
   --icon-focus-color: white;
 
   position: absolute;
-  background: $contentColor;
-  box-shadow: 0 0 $unit * 2 $boxShadow;
+  background: var(--contentColor);
+  box-shadow: 0 0 $unit * 2 var(--boxShadow);
   z-index: $zIndex-drawer;
+  height: 100%;
 
   &.left {
     left: 0;
@@ -51,7 +50,7 @@
   &.right {
     top: 0;
     width: var(--size);
-    height: 100%;
+    max-width: 95vw; /* Prevent drawer to be bigger than viewport */
   }
 
   &.top,
@@ -67,8 +66,8 @@
   }
 
   .drawer-title {
-    background: $lensBlue;
-    color: $drawerTitleText;
+    background: var(--blue);
+    color: var(--drawerTitleText);
     padding: $padding $padding * 2.5;
     word-break: break-all;
     position: relative;
@@ -85,14 +84,14 @@
       font-weight: normal;
       margin-left: 8px;
     }
-     
+
     .drawer-title-text:hover .Icon {
       opacity: 1;
       transition: opacity 250ms;
     }
 
     .MenuActions.toolbar .Icon {
-      color: $drawerTitleText;
+      color: var(--drawerTitleText);
     }
 
     .Menu {
@@ -105,13 +104,7 @@
     padding: var(--spacing);
 
     .Table .TableHead {
-      border-bottom: 1px solid $borderFaintColor;
-    }
-  }
-
-  @include media("<=900px") {
-    &.left, &.right {
-      width: var(--full-size)
+      border-bottom: 1px solid var(--borderFaintColor);
     }
   }
 }

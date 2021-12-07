@@ -25,7 +25,7 @@ import React from "react";
 import { disposeOnUnmount, observer } from "mobx-react";
 import { makeObservable, observable, reaction } from "mobx";
 import { DrawerItem, DrawerTitle } from "../drawer";
-import type { ILoadBalancerIngress, Ingress } from "../../../common/k8s-api/endpoints";
+import { ILoadBalancerIngress, Ingress } from "../../../common/k8s-api/endpoints";
 import { Table, TableCell, TableHead, TableRow } from "../table";
 import { ResourceMetrics } from "../resource-metrics";
 import type { KubeObjectDetailsProps } from "../kube-object-details";
@@ -35,6 +35,7 @@ import { getBackendServiceNamePort, getMetricsForIngress, IIngressMetrics } from
 import { getActiveClusterEntity } from "../../api/catalog-entity-registry";
 import { ClusterMetricsResourceType } from "../../../common/cluster-types";
 import { boundMethod } from "../../utils";
+import logger from "../../../common/logger";
 
 interface Props extends KubeObjectDetailsProps<Ingress> {
 }
@@ -48,10 +49,13 @@ export class IngressDetails extends React.Component<Props> {
     makeObservable(this);
   }
 
-  @disposeOnUnmount
-  clean = reaction(() => this.props.object, () => {
-    this.metrics = null;
-  });
+  componentDidMount() {
+    disposeOnUnmount(this, [
+      reaction(() => this.props.object, () => {
+        this.metrics = null;
+      }),
+    ]);
+  }
 
   @boundMethod
   async loadMetrics() {
@@ -61,7 +65,7 @@ export class IngressDetails extends React.Component<Props> {
   }
 
   renderPaths(ingress: Ingress) {
-    const { spec: { rules } } = ingress;
+    const { spec: { rules }} = ingress;
 
     if (!rules || !rules.length) return null;
 
@@ -129,6 +133,12 @@ export class IngressDetails extends React.Component<Props> {
     const { object: ingress } = this.props;
 
     if (!ingress) {
+      return null;
+    }
+
+    if (!(ingress instanceof Ingress)) {
+      logger.error("[IngressDetails]: passed object that is not an instanceof Ingress", ingress);
+
       return null;
     }
 

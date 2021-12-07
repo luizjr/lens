@@ -27,20 +27,32 @@ import { ThemeStore } from "../../../theme.store";
 import { UserStore } from "../../../../common/user-store";
 import { Notifications } from "../../notifications";
 import mockFs from "mock-fs";
+import { AppPaths } from "../../../../common/app-paths";
 
 jest.mock("electron", () => ({
   app: {
+    getVersion: () => "99.99.99",
+    getName: () => "lens",
+    setName: jest.fn(),
+    setPath: jest.fn(),
     getPath: () => "tmp",
+    getLocale: () => "en",
     setLoginItemSettings: jest.fn(),
+  },
+  ipcMain: {
+    on: jest.fn(),
+    handle: jest.fn(),
   },
 }));
 
-const mockHotbars: {[id: string]: any} = {
+AppPaths.init();
+
+const mockHotbars: { [id: string]: any } = {
   "1": {
     id: "1",
     name: "Default",
-    items: [] as any
-  }
+    items: [] as any,
+  },
 };
 
 jest.mock("../../../../common/hotbar-store", () => ({
@@ -49,15 +61,15 @@ jest.mock("../../../../common/hotbar-store", () => ({
       hotbars: [mockHotbars["1"]],
       getById: (id: string) => mockHotbars[id],
       remove: () => {},
-      hotbarIndex: () => 0
-    })
-  }
+      hotbarIndex: () => 0,
+    }),
+  },
 }));
 
 describe("<HotbarRemoveCommand />", () => {
   beforeEach(() => {
     mockFs({
-      "tmp": {}
+      "tmp": {},
     });
     UserStore.createInstance();
     ThemeStore.createInstance();

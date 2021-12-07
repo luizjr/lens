@@ -22,11 +22,14 @@
 import "./kube-event-details.scss";
 
 import React from "react";
-import { observer } from "mobx-react";
-import type { KubeObject } from "../../../common/k8s-api/kube-object";
+import { disposeOnUnmount, observer } from "mobx-react";
+import { KubeObject } from "../../../common/k8s-api/kube-object";
 import { DrawerItem, DrawerTitle } from "../drawer";
 import { cssNames } from "../../utils";
+import { LocaleDate } from "../locale-date";
 import { eventStore } from "./event.store";
+import logger from "../../../common/logger";
+import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
 
 export interface KubeEventDetailsProps {
   object: KubeObject;
@@ -34,12 +37,27 @@ export interface KubeEventDetailsProps {
 
 @observer
 export class KubeEventDetails extends React.Component<KubeEventDetailsProps> {
-  async componentDidMount() {
-    eventStore.reloadAll();
+  componentDidMount() {
+    disposeOnUnmount(this, [
+      kubeWatchApi.subscribeStores([
+        eventStore,
+      ]),
+    ]);
   }
 
   render() {
     const { object } = this.props;
+
+    if (!object) {
+      return null;
+    }
+
+    if (!(object instanceof KubeObject)) {
+      logger.error("[KubeEventDetails]: passed object that is not an instanceof KubeObject", object);
+
+      return null;
+    }
+
     const events = eventStore.getEventsByObject(object);
 
     if (!events.length) {
@@ -74,7 +92,7 @@ export class KubeEventDetails extends React.Component<KubeEventDetailsProps> {
                   {involvedObject.fieldPath}
                 </DrawerItem>
                 <DrawerItem name="Last seen">
-                  {lastTimestamp}
+                  <LocaleDate date={lastTimestamp} />
                 </DrawerItem>
               </div>
             );

@@ -22,12 +22,14 @@
 import "./pod-container-port.scss";
 
 import React from "react";
-import { observer } from "mobx-react";
+import { disposeOnUnmount, observer } from "mobx-react";
 import type { Pod } from "../../../common/k8s-api/endpoints";
-import { apiBase } from "../../api";
-import { observable, makeObservable } from "mobx";
+import { observable, makeObservable, reaction } from "mobx";
 import { cssNames } from "../../utils";
 import { Notifications } from "../notifications";
+import { Button } from "../button";
+import { aboutPortForwarding, addPortForward, getPortForward, getPortForwards, openPortForward, PortForwardDialog, portForwardStore, predictProtocol, removePortForward } from "../../port-forward";
+import type { ForwardedPort } from "../../port-forward";
 import { Spinner } from "../spinner";
 
 interface Props {
@@ -42,39 +44,136 @@ interface Props {
 @observer
 export class PodContainerPort extends React.Component<Props> {
   @observable waiting = false;
+  @observable forwardPort = 0;
+  @observable isPortForwarded = false;
 
   constructor(props: Props) {
     super(props);
     makeObservable(this);
+    this.checkExistingPortForwarding();
+  }
+
+  componentDidMount() {
+    disposeOnUnmount(this, [
+      reaction(() => [portForwardStore.portForwards, this.props.pod], () => this.checkExistingPortForwarding()),
+    ]);
+  }
+
+  async checkExistingPortForwarding() {
+    const { pod, port } = this.props;
+    const portForward: ForwardedPort = {
+      kind: "pod",
+      name: pod.getName(),
+      namespace: pod.getNs(),
+      port: port.containerPort,
+      forwardPort: this.forwardPort,
+    };
+
+    let activePort: number;
+
+    try {
+      activePort = await getPortForward(portForward) ?? 0;
+    } catch (error) {
+      this.isPortForwarded = false;
+
+      return;
+    }
+
+    this.forwardPort = activePort;
+    this.isPortForwarded = activePort ? true : false;
   }
 
   async portForward() {
     const { pod, port } = this.props;
+    const portForward: ForwardedPort = {
+      kind: "pod",
+      name: pod.getName(),
+      namespace: pod.getNs(),
+      port: port.containerPort,
+      forwardPort: this.forwardPort,
+      protocol: predictProtocol(port.name),
+    };
 
     this.waiting = true;
 
     try {
-      await apiBase.post(`/pods/${pod.getNs()}/pod/${pod.getName()}/port-forward/${port.containerPort}`, {});
-    } catch(error) {
-      Notifications.error(error);
+      // determine how many port-forwards are already active
+      const { length } = await getPortForwards();
+
+      this.forwardPort = await addPortForward(portForward);
+
+      if (this.forwardPort) {
+        portForward.forwardPort = this.forwardPort;
+        openPortForward(portForward);
+        this.isPortForwarded = true;
+
+        // if this is the first port-forward show the about notification
+        if (!length) {
+          aboutPortForwarding();
+        }
+      }
+    } catch (error) {
+      Notifications.error(`Error occurred starting port-forward, the local port may not be available or the ${portForward.kind} ${portForward.name} may not be reachable`);
+      this.checkExistingPortForwarding();
+    } finally {
+      this.waiting = false;
+    }
+  }
+
+  async stopPortForward() {
+    const { pod, port } = this.props;
+    const portForward: ForwardedPort = {
+      kind: "pod",
+      name: pod.getName(),
+      namespace: pod.getNs(),
+      port: port.containerPort,
+      forwardPort: this.forwardPort,
+    };
+
+    this.waiting = true;
+
+    try {
+      await removePortForward(portForward);
+      this.isPortForwarded = false;
+    } catch (error) {
+      Notifications.error(`Error occurred stopping the port-forward from port ${portForward.forwardPort}.`);
+      this.checkExistingPortForwarding();
     } finally {
       this.waiting = false;
     }
   }
 
   render() {
-    const { port } = this.props;
+    const { pod, port } = this.props;
     const { name, containerPort, protocol } = port;
     const text = `${name ? `${name}: ` : ""}${containerPort}/${protocol}`;
 
+    const portForwardAction = async () => {
+      if (this.isPortForwarded) {
+        await this.stopPortForward();
+      } else {
+        const portForward: ForwardedPort = {
+          kind: "pod",
+          name: pod.getName(),
+          namespace: pod.getNs(),
+          port: port.containerPort,
+          forwardPort: this.forwardPort,
+          protocol: predictProtocol(port.name),
+        };
+
+        PortForwardDialog.open(portForward, { openInBrowser: true });
+      }
+    };
+
     return (
       <div className={cssNames("PodContainerPort", { waiting: this.waiting })}>
-        <span title="Open in a browser" onClick={() => this.portForward() }>
+        <span title="Open in a browser" onClick={() => this.portForward()}>
           {text}
-          {this.waiting && (
-            <Spinner />
-          )}
         </span>
+        <Button primary onClick={() => portForwardAction()}> {this.isPortForwarded ? "Stop" : "Forward..."} </Button>
+        {this.waiting && (
+          <Spinner />
+        )}
       </div>
     );
   }

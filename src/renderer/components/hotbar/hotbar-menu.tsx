@@ -27,12 +27,13 @@ import { HotbarEntityIcon } from "./hotbar-entity-icon";
 import { cssNames, IClassName } from "../../utils";
 import { catalogEntityRegistry } from "../../api/catalog-entity-registry";
 import { HotbarStore } from "../../../common/hotbar-store";
-import { CatalogEntity, catalogEntityRunContext } from "../../api/catalog-entity";
+import type { CatalogEntity } from "../../api/catalog-entity";
 import { DragDropContext, Draggable, Droppable, DropResult } from "react-beautiful-dnd";
 import { HotbarSelector } from "./hotbar-selector";
 import { HotbarCell } from "./hotbar-cell";
 import { HotbarIcon } from "./hotbar-icon";
 import { defaultHotbarCells, HotbarItem } from "../../../common/hotbar-types";
+import { action, makeObservable, observable } from "mobx";
 
 interface Props {
   className?: IClassName;
@@ -40,6 +41,13 @@ interface Props {
 
 @observer
 export class HotbarMenu extends React.Component<Props> {
+  @observable draggingOver = false;
+
+  constructor(props: Props) {
+    super(props);
+    makeObservable(this);
+  }
+
   get hotbar() {
     return HotbarStore.getInstance().getActive();
   }
@@ -54,8 +62,16 @@ export class HotbarMenu extends React.Component<Props> {
     return catalogEntityRegistry.getById(item?.entity.uid) ?? null;
   }
 
+  @action
+  onDragStart() {
+    this.draggingOver = true;
+  }
+
+  @action
   onDragEnd(result: DropResult) {
     const { source, destination } = result;
+
+    this.draggingOver = false;
 
     if (!destination) {  // Dropped outside of the list
       return;
@@ -124,7 +140,7 @@ export class HotbarMenu extends React.Component<Props> {
                             key={index}
                             index={index}
                             entity={entity}
-                            onClick={() => entity.onRun(catalogEntityRunContext)}
+                            onClick={() => catalogEntityRegistry.onRun(entity)}
                             className={cssNames({ isDragging: snapshot.isDragging })}
                             remove={this.removeItem}
                             add={this.addItem}
@@ -138,9 +154,9 @@ export class HotbarMenu extends React.Component<Props> {
                             tooltip={`${item.entity.name} (${item.entity.source})`}
                             menuItems={[
                               {
-                                title: "Unpin from Hotbar",
-                                onClick: () => this.removeItem(item.entity.uid)
-                              }
+                                title: "Remove from Hotbar",
+                                onClick: () => this.removeItem(item.entity.uid),
+                              },
                             ]}
                             disabled
                             size={40}
@@ -165,9 +181,9 @@ export class HotbarMenu extends React.Component<Props> {
     const hotbar = hotbarStore.getActive();
 
     return (
-      <div className={cssNames("HotbarMenu flex column", className)}>
+      <div className={cssNames("HotbarMenu flex column", { draggingOver: this.draggingOver }, className)}>
         <div className="HotbarItems flex column gaps">
-          <DragDropContext onDragEnd={this.onDragEnd.bind(this)}>
+          <DragDropContext onDragStart={() => this.onDragStart()} onDragEnd={(result) => this.onDragEnd(result)}>
             {this.renderGrid()}
           </DragDropContext>
         </div>

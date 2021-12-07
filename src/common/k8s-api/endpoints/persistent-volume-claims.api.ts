@@ -19,7 +19,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import { KubeObject } from "../kube-object";
+import { KubeObject, LabelSelector } from "../kube-object";
 import { autoBind } from "../../utils";
 import { IMetrics, metricsApi } from "./metrics.api";
 import type { Pod } from "./pods.api";
@@ -31,11 +31,13 @@ export class PersistentVolumeClaimsApi extends KubeApi<PersistentVolumeClaim> {
 }
 
 export function getMetricsForPvc(pvc: PersistentVolumeClaim): Promise<IPvcMetrics> {
+  const opts = { category: "pvc", pvc: pvc.getName(), namespace: pvc.getNs() };
+
   return metricsApi.getMetrics({
-    diskUsage: { category: "pvc", pvc: pvc.getName() },
-    diskCapacity: { category: "pvc", pvc: pvc.getName() }
+    diskUsage: opts,
+    diskCapacity: opts,
   }, {
-    namespace: pvc.getNs()
+    namespace: opts.namespace,
   });
 }
 
@@ -49,16 +51,7 @@ export interface PersistentVolumeClaim {
   spec: {
     accessModes: string[];
     storageClassName: string;
-    selector: {
-      matchLabels: {
-        release: string;
-      };
-      matchExpressions: {
-        key: string; // environment,
-        operator: string; // In,
-        values: string[]; // [dev]
-      }[];
-    };
+    selector: LabelSelector;
     resources: {
       requests: {
         storage: string; // 8Gi
@@ -86,7 +79,7 @@ export class PersistentVolumeClaim extends KubeObject {
     return pods.filter(pod => {
       return pod.getVolumes().filter(volume =>
         volume.persistentVolumeClaim &&
-        volume.persistentVolumeClaim.claimName === this.getName()
+        volume.persistentVolumeClaim.claimName === this.getName(),
       ).length > 0;
     });
   }
@@ -126,5 +119,5 @@ if (isClusterPageContext()) {
 }
 
 export {
-  pvcApi
+  pvcApi,
 };

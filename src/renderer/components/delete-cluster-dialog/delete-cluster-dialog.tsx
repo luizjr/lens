@@ -45,22 +45,19 @@ type DialogState = {
 };
 
 const dialogState: DialogState = observable({
-  isOpen: false
+  isOpen: false,
 });
 
 type Props = {};
 
 @observer
 export class DeleteClusterDialog extends React.Component {
-  showContextSwitch = false;
-  newCurrentContext = "";
+  @observable showContextSwitch = false;
+  @observable newCurrentContext = "";
 
   constructor(props: Props) {
     super(props);
-    makeObservable(this, {
-      showContextSwitch: observable,
-      newCurrentContext: observable
-    });
+    makeObservable(this);
   }
 
   static open({ config, cluster }: Partial<DialogState>) {
@@ -92,7 +89,7 @@ export class DeleteClusterDialog extends React.Component {
 
   removeContext() {
     dialogState.config.contexts = dialogState.config.contexts.filter(item =>
-      item.name !== dialogState.cluster.contextName
+      item.name !== dialogState.cluster.contextName,
     );
   }
 
@@ -116,6 +113,7 @@ export class DeleteClusterDialog extends React.Component {
       await requestMain(clusterDeleteHandler, cluster.id);
     } catch(error) {
       Notifications.error(`Cannot remove cluster, failed to process config file. ${error}`);
+    } finally {
       await requestMain(clusterClearDeletingHandler, cluster.id);
     }
 

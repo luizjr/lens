@@ -56,13 +56,14 @@ function bindClusterManagerRouteEvents() {
   reaction(() => getMatchedClusterId(), clusterId => {
     broadcastMessage(IpcRendererNavigationEvents.CLUSTER_VIEW_CURRENT_ID, clusterId);
   }, {
-    fireImmediately: true
+    fireImmediately: true,
   });
 
   // Handle navigation via IPC
   ipcRendererOn(IpcRendererNavigationEvents.NAVIGATE_IN_APP, (event, url: string) => {
     logger.info(`[IPC]: navigate to ${url}`, { currentLocation: location.href });
     navigate(url);
+    window.focus(); // make sure that the main frame is focused
   });
 }
 

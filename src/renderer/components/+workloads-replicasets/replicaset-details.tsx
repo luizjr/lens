@@ -39,6 +39,8 @@ import { KubeObjectMeta } from "../kube-object-meta";
 import { getActiveClusterEntity } from "../../api/catalog-entity-registry";
 import { ClusterMetricsResourceType } from "../../../common/cluster-types";
 import { boundMethod } from "../../utils";
+import logger from "../../../common/logger";
+import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
 
 interface Props extends KubeObjectDetailsProps<ReplicaSet> {
 }
@@ -52,13 +54,15 @@ export class ReplicaSetDetails extends React.Component<Props> {
     makeObservable(this);
   }
 
-  @disposeOnUnmount
-  clean = reaction(() => this.props.object, () => {
-    this.metrics = null;
-  });
-
-  async componentDidMount() {
-    podsStore.reloadAll();
+  componentDidMount() {
+    disposeOnUnmount(this, [
+      reaction(() => this.props.object, () => {
+        this.metrics = null;
+      }),
+      kubeWatchApi.subscribeStores([
+        podsStore,
+      ]),
+    ]);
   }
 
   @boundMethod
@@ -71,7 +75,16 @@ export class ReplicaSetDetails extends React.Component<Props> {
   render() {
     const { object: replicaSet } = this.props;
 
-    if (!replicaSet) return null;
+    if (!replicaSet) {
+      return null;
+    }
+
+    if (!(replicaSet instanceof ReplicaSet)) {
+      logger.error("[ReplicaSetDetails]: passed object that is not an instanceof ReplicaSet", replicaSet);
+
+      return null;
+    }
+
     const { metrics } = this;
     const { status } = replicaSet;
     const { availableReplicas, replicas } = status;

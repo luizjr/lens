@@ -30,16 +30,16 @@ export function initWorkloadsOverviewDetailRegistry() {
     .add([
       {
         components: {
-          Details: (props: any) => <OverviewStatuses {...props} />,
-        }
+          Details: OverviewStatuses,
+        },
       },
       {
         priority: 5,
         components: {
           Details: () => (
             isAllowedResource("events") && <Events compact hideFilters className="box grow" />
-          )
-        }
-      }
+          ),
+        },
+      },
     ]);
 }

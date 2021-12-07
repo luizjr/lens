@@ -24,17 +24,15 @@ import "./crd-details.scss";
 import React from "react";
 import { Link } from "react-router-dom";
 import { observer } from "mobx-react";
-import type { CustomResourceDefinition } from "../../../common/k8s-api/endpoints/crd.api";
-import { cssNames } from "../../utils";
-import { ThemeStore } from "../../theme.store";
+import { CustomResourceDefinition } from "../../../common/k8s-api/endpoints/crd.api";
 import { Badge } from "../badge";
 import { DrawerItem, DrawerTitle } from "../drawer";
 import type { KubeObjectDetailsProps } from "../kube-object-details";
 import { Table, TableCell, TableHead, TableRow } from "../table";
 import { Input } from "../input";
 import { KubeObjectMeta } from "../kube-object-meta";
-import MonacoEditor from "react-monaco-editor";
-import { UserStore } from "../../../common/user-store";
+import { MonacoEditor } from "../monaco-editor";
+import logger from "../../../common/logger";
 
 interface Props extends KubeObjectDetailsProps<CustomResourceDefinition> {
 }
@@ -44,7 +42,16 @@ export class CRDDetails extends React.Component<Props> {
   render() {
     const { object: crd } = this.props;
 
-    if (!crd) return null;
+    if (!crd) {
+      return null;
+    }
+
+    if (!(crd instanceof CustomResourceDefinition)) {
+      logger.error("[CRDDetails]: passed object that is not an instanceof CustomResourceDefinition", crd);
+
+      return null;
+    }
+
     const { plural, singular, kind, listKind } = crd.getNames();
     const printerColumns = crd.getPrinterColumns();
     const validation = crd.getValidation();
@@ -117,43 +124,41 @@ export class CRDDetails extends React.Component<Props> {
           </TableRow>
         </Table>
         {printerColumns.length > 0 &&
-        <>
-          <DrawerTitle title="Additional Printer Columns"/>
-          <Table selectable className="printer-columns box grow">
-            <TableHead>
-              <TableCell className="name">Name</TableCell>
-              <TableCell className="type">Type</TableCell>
-              <TableCell className="json-path">JSON Path</TableCell>
-            </TableHead>
-            {
-              printerColumns.map((column, index) => {
-                const { name, type, jsonPath } = column;
+          <>
+            <DrawerTitle title="Additional Printer Columns"/>
+            <Table selectable className="printer-columns box grow">
+              <TableHead>
+                <TableCell className="name">Name</TableCell>
+                <TableCell className="type">Type</TableCell>
+                <TableCell className="json-path">JSON Path</TableCell>
+              </TableHead>
+              {
+                printerColumns.map((column, index) => {
+                  const { name, type, jsonPath } = column;
 
-                return (
-                  <TableRow key={index}>
-                    <TableCell className="name">{name}</TableCell>
-                    <TableCell className="type">{type}</TableCell>
-                    <TableCell className="json-path">
-                      <Badge label={jsonPath}/>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            }
-          </Table>
-        </>
+                  return (
+                    <TableRow key={index}>
+                      <TableCell className="name">{name}</TableCell>
+                      <TableCell className="type">{type}</TableCell>
+                      <TableCell className="json-path">
+                        <Badge label={jsonPath}/>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              }
+            </Table>
+          </>
         }
         {validation &&
-        <>
-          <DrawerTitle title="Validation"/>
-          <MonacoEditor
-            options={{readOnly: true, ...UserStore.getInstance().getEditorOptions()}}
-            className={cssNames("MonacoEditor", "validation")}
-            theme={ThemeStore.getInstance().activeTheme.monacoTheme}
-            language="yaml"
-            value={validation}
-          />
-        </>
+          <>
+            <DrawerTitle title="Validation"/>
+            <MonacoEditor
+              readOnly
+              value={validation}
+              style={{ height: 400 }}
+            />
+          </>
         }
       </div>
     );

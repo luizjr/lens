@@ -24,7 +24,7 @@ import "./release-details.scss";
 import React, { Component } from "react";
 import groupBy from "lodash/groupBy";
 import isEqual from "lodash/isEqual";
-import { observable, reaction, makeObservable } from "mobx";
+import { makeObservable, observable, reaction } from "mobx";
 import { Link } from "react-router-dom";
 import kebabCase from "lodash/kebabCase";
 import { getRelease, getReleaseValues, HelmRelease, IReleaseDetails } from "../../../common/k8s-api/endpoints/helm-releases.api";
@@ -46,8 +46,7 @@ import { secretsStore } from "../+config-secrets/secrets.store";
 import { Secret } from "../../../common/k8s-api/endpoints";
 import { getDetailsUrl } from "../kube-detail-params";
 import { Checkbox } from "../checkbox";
-import MonacoEditor from "react-monaco-editor";
-import { UserStore } from "../../../common/user-store";
+import { MonacoEditor } from "../monaco-editor";
 
 interface Props {
   release: HelmRelease;
@@ -56,12 +55,13 @@ interface Props {
 
 @observer
 export class ReleaseDetails extends Component<Props> {
-  @observable details: IReleaseDetails;
+  @observable details: IReleaseDetails | null = null;
   @observable values = "";
   @observable valuesLoading = false;
-  @observable showOnlyUserSuppliedValues = false;
+  @observable showOnlyUserSuppliedValues = true;
   @observable saving = false;
   @observable releaseSecret: Secret;
+  @observable error?: string = undefined;
 
   componentDidMount() {
     disposeOnUnmount(this, [
@@ -97,8 +97,12 @@ export class ReleaseDetails extends Component<Props> {
   async loadDetails() {
     const { release } = this.props;
 
-    this.details = null;
-    this.details = await getRelease(release.getName(), release.getNs());
+    try {
+      this.details = null;
+      this.details = await getRelease(release.getName(), release.getNs());
+    } catch (error) {
+      this.error = `Failed to get release details: ${error}`;
+    }
   }
 
   async loadValues() {
@@ -123,7 +127,7 @@ export class ReleaseDetails extends Component<Props> {
       chart: release.getChart(),
       repo: await release.getRepo(),
       version: release.getVersion(),
-      values: this.values
+      values: this.values,
     };
 
     this.saving = true;
@@ -131,7 +135,7 @@ export class ReleaseDetails extends Component<Props> {
     try {
       await releaseStore.update(name, namespace, data);
       Notifications.ok(
-        <p>Release <b>{name}</b> successfully updated!</p>
+        <p>Release <b>{name}</b> successfully updated!</p>,
       );
     } catch (err) {
       Notifications.error(err);
@@ -160,14 +164,13 @@ export class ReleaseDetails extends Component<Props> {
             disabled={valuesLoading}
           />
           <MonacoEditor
-            language="yaml"
+            readOnly={valuesLoading}
+            className={cssNames({ loading: valuesLoading })}
+            style={{ minHeight: 300 }}
             value={values}
             onChange={text => this.values = text}
-            theme={ThemeStore.getInstance().activeTheme.monacoTheme}
-            className={cssNames("MonacoEditor", {loading: valuesLoading})}
-            options={{readOnly: valuesLoading || this.showOnlyUserSuppliedValues, ...UserStore.getInstance().getEditorOptions()}}
           >
-            {valuesLoading && <Spinner center />}
+            {valuesLoading && <Spinner center/>}
           </MonacoEditor>
           <Button
             primary
@@ -237,11 +240,18 @@ export class ReleaseDetails extends Component<Props> {
 
   renderContent() {
     const { release } = this.props;
-    const { details } = this;
 
     if (!release) return null;
 
-    if (!details) {
+    if (this.error) {
+      return (
+        <div className="loading-error">
+          {this.error}
+        </div>
+      );
+    }
+
+    if (!this.details) {
       return <Spinner center/>;
     }
 

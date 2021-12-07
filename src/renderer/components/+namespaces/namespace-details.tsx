@@ -38,6 +38,8 @@ import { PodCharts, podMetricTabs } from "../+workloads-pods/pod-charts";
 import { ClusterMetricsResourceType } from "../../../common/cluster-types";
 import { getActiveClusterEntity } from "../../api/catalog-entity-registry";
 import { getDetailsUrl } from "../kube-detail-params";
+import logger from "../../../common/logger";
+import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
 
 interface Props extends KubeObjectDetailsProps<Namespace> {
 }
@@ -51,14 +53,16 @@ export class NamespaceDetails extends React.Component<Props> {
     makeObservable(this);
   }
 
-  @disposeOnUnmount
-  clean = reaction(() => this.props.object, () => {
-    this.metrics = null;
-  });
-
   componentDidMount() {
-    resourceQuotaStore.reloadAll();
-    limitRangeStore.reloadAll();
+    disposeOnUnmount(this, [
+      reaction(() => this.props.object, () => {
+        this.metrics = null;
+      }),
+      kubeWatchApi.subscribeStores([
+        resourceQuotaStore,
+        limitRangeStore,
+      ]),
+    ]);
   }
 
   @computed get quotas() {
@@ -81,7 +85,16 @@ export class NamespaceDetails extends React.Component<Props> {
   render() {
     const { object: namespace } = this.props;
 
-    if (!namespace) return null;
+    if (!namespace) {
+      return null;
+    }
+
+    if (!(namespace instanceof Namespace)) {
+      logger.error("[NamespaceDetails]: passed object that is not an instanceof Namespace", namespace);
+
+      return null;
+    }
+
     const status = namespace.getStatus();
     const isMetricHidden = getActiveClusterEntity()?.isMetricHidden(ClusterMetricsResourceType.Namespace);
 

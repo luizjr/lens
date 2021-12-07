@@ -35,26 +35,26 @@ export class Notifications extends React.Component {
   public elem: HTMLElement;
 
   static ok(message: NotificationMessage) {
-    notificationsStore.add({
+    return notificationsStore.add({
       message,
       timeout: 2_500,
-      status: NotificationStatus.OK
+      status: NotificationStatus.OK,
     });
   }
 
   static error(message: NotificationMessage, customOpts: Partial<Notification> = {}) {
-    notificationsStore.add({
+    return notificationsStore.add({
       message,
       timeout: 10_000,
       status: NotificationStatus.ERROR,
-      ...customOpts
+      ...customOpts,
     });
   }
 
   static shortInfo(message: NotificationMessage, customOpts: Partial<Notification> = {}) {
-    this.info(message, {
+    return this.info(message, {
       timeout: 5_000,
-      ...customOpts
+      ...customOpts,
     });
   }
 
@@ -81,7 +81,7 @@ export class Notifications extends React.Component {
     }
     this.elem.scrollTo({
       top: this.elem.scrollHeight,
-      behavior: "smooth"
+      behavior: "smooth",
     });
   }
 

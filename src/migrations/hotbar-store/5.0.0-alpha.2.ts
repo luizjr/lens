@@ -27,11 +27,12 @@ import type { MigrationDeclaration } from "../helpers";
 export default {
   version: "5.0.0-alpha.2",
   run(store) {
-    const hotbars = (store.get("hotbars") || []) as Hotbar[];
+    const rawHotbars = store.get("hotbars");
+    const hotbars: Hotbar[] = Array.isArray(rawHotbars) ? rawHotbars : [];
 
     store.set("hotbars", hotbars.map((hotbar) => ({
       id: uuid.v4(),
-      ...hotbar
+      ...hotbar,
     })));
-  }
+  },
 } as MigrationDeclaration;

@@ -49,7 +49,8 @@ export class Namespaces extends React.Component<Props> {
         <KubeObjectListLayout
           isConfigurable
           tableId="namespaces"
-          className="Namespaces" store={namespaceStore}
+          className="Namespaces"
+          store={namespaceStore}
           sortingCallbacks={{
             [columnId.name]: ns => ns.getName(),
             [columnId.labels]: ns => ns.getLabels(),
@@ -58,20 +59,20 @@ export class Namespaces extends React.Component<Props> {
           }}
           searchFilters={[
             item => item.getSearchFields(),
-            item => item.getStatus()
+            item => item.getStatus(),
           ]}
           renderHeaderTitle="Namespaces"
           renderTableHeader={[
             { title: "Name", className: "name", sortBy: columnId.name, id: columnId.name },
             { className: "warning", showWithColumn: columnId.name },
-            { title: "Labels", className: "labels", sortBy: columnId.labels, id: columnId.labels },
+            { title: "Labels", className: "labels scrollable", sortBy: columnId.labels, id: columnId.labels },
             { title: "Age", className: "age", sortBy: columnId.age, id: columnId.age },
             { title: "Status", className: "status", sortBy: columnId.status, id: columnId.status },
           ]}
           renderTableContents={item => [
             item.getName(),
             <KubeObjectStatusIcon key="icon" object={item} />,
-            item.getLabels().map(label => <Badge key={label} label={label}/>),
+            item.getLabels().map(label => <Badge scrollable key={label} label={label}/>),
             item.getAge(),
             { title: item.getStatus(), className: item.getStatus().toLowerCase() },
           ]}

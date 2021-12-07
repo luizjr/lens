@@ -70,7 +70,7 @@ function getMimeType(filename: string) {
     svg: "image/svg+xml",
     js: "application/javascript",
     woff2: "font/woff2",
-    ttf: "font/ttf"
+    ttf: "font/ttf",
   };
 
   return mimeTypes[path.extname(filename).slice(1)] || "text/plain";
@@ -118,11 +118,11 @@ export class Router {
       response: res,
       query: url.searchParams,
       payload,
-      params
+      params,
     };
   }
 
-  protected static async handleStaticFile({ params, response, raw: { req } }: LensApiRequest): Promise<void> {
+  protected static async handleStaticFile({ params, response, raw: { req }}: LensApiRequest): Promise<void> {
     let filePath = params.path;
 
     for (let retryCount = 0; retryCount < 5; retryCount += 1) {
@@ -179,8 +179,11 @@ export class Router {
     this.router.add({ method: "post", path: `${apiPrefix}/metrics` }, MetricsRoute.routeMetrics);
     this.router.add({ method: "get", path: `${apiPrefix}/metrics/providers` }, MetricsRoute.routeMetricsProviders);
 
-    // Port-forward API
-    this.router.add({ method: "post", path: `${apiPrefix}/pods/{namespace}/{resourceType}/{resourceName}/port-forward/{port}` }, PortForwardRoute.routePortForward);
+    // Port-forward API (the container port and local forwarding port are obtained from the query parameters)
+    this.router.add({ method: "post", path: `${apiPrefix}/pods/port-forward/{namespace}/{resourceType}/{resourceName}` }, PortForwardRoute.routePortForward);
+    this.router.add({ method: "get", path: `${apiPrefix}/pods/port-forward/{namespace}/{resourceType}/{resourceName}` }, PortForwardRoute.routeCurrentPortForward);
+    this.router.add({ method: "get", path: `${apiPrefix}/pods/port-forwards` }, PortForwardRoute.routeAllPortForwards);
+    this.router.add({ method: "delete", path: `${apiPrefix}/pods/port-forward/{namespace}/{resourceType}/{resourceName}` }, PortForwardRoute.routeCurrentPortForwardStop);
 
     // Helm API
     this.router.add({ method: "get", path: `${apiPrefix}/v2/charts` }, HelmApiRoute.listCharts);
@@ -198,5 +201,6 @@ export class Router {
 
     // Resource Applier API
     this.router.add({ method: "post", path: `${apiPrefix}/stack` }, ResourceApplierApiRoute.applyResource);
+    this.router.add({ method: "patch", path: `${apiPrefix}/stack` }, ResourceApplierApiRoute.patchResource);
   }
 }

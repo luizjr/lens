@@ -26,12 +26,11 @@ import { observer } from "mobx-react";
 import { Link } from "react-router-dom";
 import { podsStore } from "./pods.store";
 import type { RouteComponentProps } from "react-router";
-import { volumeClaimStore } from "../+storage-volume-claims/volume-claim.store";
 import { eventStore } from "../+events/event.store";
 import { KubeObjectListLayout } from "../kube-object-list-layout";
 import { nodesApi, Pod } from "../../../common/k8s-api/endpoints";
 import { StatusBrick } from "../status-brick";
-import { cssNames, stopPropagation } from "../../utils";
+import { cssNames, getConvertedParts, stopPropagation } from "../../utils";
 import toPairs from "lodash/toPairs";
 import startCase from "lodash/startCase";
 import kebabCase from "lodash/kebabCase";
@@ -68,9 +67,9 @@ export class Pods extends React.Component<Props> {
             className={cssNames(state, { ready })}
             tooltip={{
               formatters: {
-                tableView: true
+                tableView: true,
               },
-              children: Object.keys(state).map(status => (
+              children: Object.keys(state).map((status: keyof typeof state) => (
                 <Fragment key={status}>
                   <div className="title">
                     {name} <span className="text-secondary">({status}{ready ? ", ready" : ""})</span>
@@ -82,7 +81,7 @@ export class Pods extends React.Component<Props> {
                     </div>
                   ))}
                 </Fragment>
-              ))
+              )),
             }}
           />
         </Fragment>
@@ -93,12 +92,13 @@ export class Pods extends React.Component<Props> {
   render() {
     return (
       <KubeObjectListLayout
-        className="Pods" store={podsStore}
-        dependentStores={[volumeClaimStore, eventStore]}
+        className="Pods"
+        store={podsStore}
+        dependentStores={[eventStore]} // status icon component uses event store
         tableId = "workloads_pods"
         isConfigurable
         sortingCallbacks={{
-          [columnId.name]: pod => pod.getName(),
+          [columnId.name]: pod => getConvertedParts(pod.getName()),
           [columnId.namespace]: pod => pod.getNs(),
           [columnId.containers]: pod => pod.getContainers().length,
           [columnId.restarts]: pod => pod.getRestartsCount(),
@@ -154,7 +154,7 @@ export class Pods extends React.Component<Props> {
             : "",
           pod.getQosClass(),
           pod.getAge(),
-          { title: pod.getStatusMessage(), className: kebabCase(pod.getStatusMessage()) }
+          { title: pod.getStatusMessage(), className: kebabCase(pod.getStatusMessage()) },
         ]}
       />
     );

@@ -19,7 +19,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import "./cluster-overview.scss";
+import styles from "./cluster-overview.module.css";
 
 import React from "react";
 import { reaction } from "mobx";
@@ -36,6 +36,8 @@ import { ClusterPieCharts } from "./cluster-pie-charts";
 import { getActiveClusterEntity } from "../../api/catalog-entity-registry";
 import { ClusterMetricsResourceType } from "../../../common/cluster-types";
 import { ClusterStore } from "../../../common/cluster-store";
+import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
+import { eventStore } from "../+events/event.store";
 
 @observer
 export class ClusterOverview extends React.Component {
@@ -53,9 +55,14 @@ export class ClusterOverview extends React.Component {
     this.metricPoller.start(true);
 
     disposeOnUnmount(this, [
+      kubeWatchApi.subscribeStores([
+        podsStore,
+        eventStore,
+        nodesStore,
+      ]),
       reaction(
         () => clusterOverviewStore.metricNodeRole, // Toggle Master/Worker node switcher
-        () => this.metricPoller.restart(true)
+        () => this.metricPoller.restart(true),
       ),
     ]);
   }
@@ -91,12 +98,12 @@ export class ClusterOverview extends React.Component {
   }
 
   render() {
-    const isLoaded = nodesStore.isLoaded && podsStore.isLoaded;
+    const isLoaded = nodesStore.isLoaded && eventStore.isLoaded;
     const isMetricHidden = getActiveClusterEntity()?.isMetricHidden(ClusterMetricsResourceType.Cluster);
 
     return (
       <TabLayout>
-        <div className="ClusterOverview">
+        <div className={styles.ClusterOverview} data-testid="cluster-overview-page">
           {this.renderClusterOverview(isLoaded, isMetricHidden)}
         </div>
       </TabLayout>

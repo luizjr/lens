@@ -24,30 +24,32 @@ import "./create-resource.scss";
 import React from "react";
 import path from "path";
 import fs from "fs-extra";
-import {Select, GroupSelectOption, SelectOption} from "../select";
-import jsYaml from "js-yaml";
-import { observable, makeObservable } from "mobx";
+import { GroupSelectOption, Select, SelectOption } from "../select";
+import yaml from "js-yaml";
+import { makeObservable, observable } from "mobx";
 import { observer } from "mobx-react";
-import { cssNames } from "../../utils";
 import { createResourceStore } from "./create-resource.store";
 import type { DockTab } from "./dock.store";
 import { EditorPanel } from "./editor-panel";
 import { InfoPanel } from "./info-panel";
-import { resourceApplierApi } from "../../../common/k8s-api/endpoints/resource-applier.api";
-import type { JsonApiErrorParsed } from "../../../common/k8s-api/json-api";
+import * as resourceApplierApi from "../../../common/k8s-api/endpoints/resource-applier.api";
 import { Notifications } from "../notifications";
-import { monacoModelsManager } from "./monaco-model-manager";
+import logger from "../../../common/logger";
+import type { KubeJsonApiData } from "../../../common/k8s-api/kube-json-api";
+import { getDetailsUrl } from "../kube-detail-params";
+import { apiManager } from "../../../common/k8s-api/api-manager";
+import { prevDefault } from "../../utils";
+import { navigate } from "../../navigation";
 
 interface Props {
-  className?: string;
   tab: DockTab;
 }
 
 @observer
 export class CreateResource extends React.Component<Props> {
-  @observable currentTemplates:Map<string,SelectOption> = new Map();
+  @observable currentTemplates: Map<string, SelectOption> = new Map();
   @observable error = "";
-  @observable templates:GroupSelectOption<SelectOption>[] = [];
+  @observable templates: GroupSelectOption<SelectOption>[] = [];
 
   constructor(props: Props) {
     super(props);
@@ -59,15 +61,15 @@ export class CreateResource extends React.Component<Props> {
     createResourceStore.watchUserTemplates(() => createResourceStore.getMergedTemplates().then(v => this.updateGroupSelectOptions(v)));
   }
 
-  updateGroupSelectOptions(templates :Record<string, string[]>) {
+  updateGroupSelectOptions(templates: Record<string, string[]>) {
     this.templates = Object.entries(templates)
       .map(([name, grouping]) => this.convertToGroup(name, grouping));
   }
 
-  convertToGroup(group:string, items:string[]):GroupSelectOption {
-    const options = items.map(v => ({label: path.parse(v).name, value: v}));
+  convertToGroup(group: string, items: string[]): GroupSelectOption {
+    const options = items.map(v => ({ label: path.parse(v).name, value: v }));
 
-    return {label: group, options};
+    return { label: group, options };
   }
 
   get tabId() {
@@ -82,90 +84,97 @@ export class CreateResource extends React.Component<Props> {
     return this.currentTemplates.get(this.tabId) ?? null;
   }
 
-  onChange = (value: string, error?: string) => {
+  onChange = (value: string) => {
+    this.error = ""; // reset first, validation goes later
     createResourceStore.setData(this.tabId, value);
-    this.error = error;
+  };
+
+  onError = (error: Error | string) => {
+    this.error = error.toString();
   };
 
   onSelectTemplate = (item: SelectOption) => {
     this.currentTemplates.set(this.tabId, item);
-    fs.readFile(item.value,"utf8").then(v => {
-      createResourceStore.setData(this.tabId,v);
-      monacoModelsManager.getModel(this.tabId).setValue(v ?? "");
+    fs.readFile(item.value, "utf8").then(v => {
+      createResourceStore.setData(this.tabId, v);
     });
   };
 
-  create = async () => {
+  create = async (): Promise<undefined> => {
     if (this.error || !this.data.trim()) {
       // do not save when field is empty or there is an error
       return null;
     }
 
-    // skip empty documents if "---" pasted at the beginning or end
-    const resources = jsYaml.safeLoadAll(this.data).filter(Boolean);
-    const createdResources: string[] = [];
-    const errors: string[] = [];
+    // skip empty documents
+    const resources = yaml.loadAll(this.data).filter(Boolean);
 
-    await Promise.all(
-      resources.map(data => {
-        return resourceApplierApi.update(data)
-          .then(item => createdResources.push(item.metadata.name))
-          .catch((err: JsonApiErrorParsed) => errors.push(err.toString()));
-      })
-    );
-
-    if (errors.length) {
-      errors.forEach(error => Notifications.error(error));
-      if (!createdResources.length) throw errors[0];
+    if (resources.length === 0) {
+      return void logger.info("Nothing to create");
     }
-    const successMessage = (
-      <p>
-        {createdResources.length === 1 ? "Resource" : "Resources"}{" "}
-        <b>{createdResources.join(", ")}</b> successfully created
-      </p>
-    );
 
-    Notifications.ok(successMessage);
+    const creatingResources = resources.map(async (resource: string) => {
+      try {
+        const data: KubeJsonApiData = await resourceApplierApi.update(resource);
+        const { kind, apiVersion, metadata: { name, namespace }} = data;
+        const resourceLink = apiManager.lookupApiLink({ kind, apiVersion, name, namespace });
 
-    return successMessage;
+        const showDetails = () => {
+          navigate(getDetailsUrl(resourceLink));
+          close();
+        };
+
+        const close = Notifications.ok(
+          <p>
+            {kind} <a onClick={prevDefault(showDetails)}>{name}</a> successfully created.
+          </p>,
+        );
+      } catch (error) {
+        Notifications.error(error?.toString() ?? "Unknown error occured");
+      }
+    });
+
+    await Promise.allSettled(creatingResources);
+
+    return undefined;
   };
 
-  renderControls(){
+  renderControls() {
     return (
       <div className="flex gaps align-center">
         <Select
-          autoConvertOptions = {false}
+          autoConvertOptions={false}
+          controlShouldRenderValue={false} // always keep initial placeholder
           className="TemplateSelect"
           placeholder="Select Template ..."
           options={this.templates}
           menuPlacement="top"
           themeName="outlined"
           onChange={v => this.onSelectTemplate(v)}
-          value = {this.currentTemplate}
+          value={this.currentTemplate}
         />
       </div>
     );
   }
 
-
   render() {
-    const { tabId, data, error, create, onChange } = this;
-    const { className } = this.props;
+    const { tabId, data, error } = this;
 
     return (
-      <div className={cssNames("CreateResource flex column", className)}>
+      <div className="CreateResource flex column">
         <InfoPanel
           tabId={tabId}
           error={error}
           controls={this.renderControls()}
-          submit={create}
+          submit={this.create}
           submitLabel="Create"
           showNotifications={false}
         />
         <EditorPanel
           tabId={tabId}
           value={data}
-          onChange={onChange}
+          onChange={this.onChange}
+          onError={this.onError}
         />
       </div>
     );

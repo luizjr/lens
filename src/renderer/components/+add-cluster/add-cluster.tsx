@@ -19,12 +19,12 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import "./add-cluster.scss";
+import styles from "./add-cluster.module.css";
 
 import type { KubeConfig } from "@kubernetes/client-node";
 import fse from "fs-extra";
 import { debounce } from "lodash";
-import { action, computed, observable, makeObservable } from "mobx";
+import { action, computed, makeObservable, observable } from "mobx";
 import { observer } from "mobx-react";
 import path from "path";
 import React from "react";
@@ -34,13 +34,11 @@ import { appEventBus } from "../../../common/event-bus";
 import { loadConfigFromString, splitConfig } from "../../../common/kube-helpers";
 import { docsUrl } from "../../../common/vars";
 import { navigate } from "../../navigation";
-import { getCustomKubeConfigPath, cssNames, iter } from "../../utils";
+import { getCustomKubeConfigPath, iter } from "../../utils";
 import { Button } from "../button";
 import { Notifications } from "../notifications";
 import { SettingLayout } from "../layout/setting-layout";
-import MonacoEditor from "react-monaco-editor";
-import { ThemeStore } from "../../theme.store";
-import { UserStore } from "../../../common/user-store";
+import { MonacoEditor } from "../monaco-editor";
 
 interface Option {
   config: KubeConfig;
@@ -53,7 +51,7 @@ function getContexts(config: KubeConfig): Map<string, Option> {
       .map(({ config, error }) => [config.currentContext, {
         config,
         error,
-      }])
+      }]),
   );
 }
 
@@ -76,7 +74,7 @@ export class AddCluster extends React.Component {
   @computed get allErrors(): string[] {
     return [
       ...this.errors,
-      ...iter.map(this.kubeContexts.values(), ({ error }) => error)
+      ...iter.map(this.kubeContexts.values(), ({ error }) => error),
     ].filter(Boolean);
   }
 
@@ -85,7 +83,7 @@ export class AddCluster extends React.Component {
     const { config, error } = loadConfigFromString(this.customConfig.trim() || "{}");
 
     this.kubeContexts.replace(getContexts(config));
-    
+
     if (error) {
       this.errors.push(error.toString());
     }
@@ -116,18 +114,16 @@ export class AddCluster extends React.Component {
 
   render() {
     return (
-      <SettingLayout className="AddClusters">
+      <SettingLayout className={styles.AddClusters}>
         <h2>Add Clusters from Kubeconfig</h2>
         <p>
-          Clusters added here are <b>not</b> merged into the <code>~/.kube/config</code> file.
-          Read more about adding clusters <a href={`${docsUrl}/catalog/add-clusters/`} rel="noreferrer" target="_blank">here</a>.
+          Clusters added here are <b>not</b> merged into the <code>~/.kube/config</code> file.{" "}
+          <a href={`${docsUrl}/catalog/add-clusters/`} rel="noreferrer" target="_blank">Read more about adding clusters</a>.
         </p>
         <div className="flex column">
           <MonacoEditor
-            options={{...UserStore.getInstance().getEditorOptions()}}
-            className={cssNames("MonacoEditor")}
-            theme={ThemeStore.getInstance().activeTheme.monacoTheme}
-            language="yaml"
+            autoFocus
+            className={styles.editor}
             value={this.customConfig}
             onChange={value => {
               this.customConfig = value;

@@ -24,10 +24,10 @@ import { autoBind } from "../../utils";
 import { IAffinity, WorkloadKubeObject } from "../workload-kube-object";
 import { KubeApi } from "../kube-api";
 import { metricsApi } from "./metrics.api";
-import type { JsonApiParams } from "../json-api";
 import type { KubeJsonApiData } from "../kube-json-api";
 import type { IPodContainer, IPodMetrics } from "./pods.api";
 import { isClusterPageContext } from "../../utils/cluster-id-url-parsing";
+import type { LabelSelector } from "../kube-object";
 
 export class Job extends WorkloadKubeObject {
   static kind = "Job";
@@ -43,11 +43,7 @@ export class Job extends WorkloadKubeObject {
     parallelism?: number;
     completions?: number;
     backoffLimit?: number;
-    selector?: {
-      matchLabels: {
-        [name: string]: string;
-      };
-    };
+    selector?: LabelSelector;
     template: {
       metadata: {
         creationTimestamp?: string;
@@ -121,14 +117,6 @@ export class Job extends WorkloadKubeObject {
 
     return [...containers].map(container => container.image);
   }
-
-  delete() {
-    const params: JsonApiParams = {
-      query: { propagationPolicy: "Background" }
-    };
-
-    return super.delete(params);
-  }
 }
 
 export class JobApi extends KubeApi<Job> {
@@ -142,6 +130,8 @@ export function getMetricsForJobs(jobs: Job[], namespace: string, selector = "")
     cpuUsage: opts,
     memoryUsage: opts,
     fsUsage: opts,
+    fsWrites: opts,
+    fsReads: opts,
     networkReceive: opts,
     networkTransmit: opts,
   }, {
@@ -158,5 +148,5 @@ if (isClusterPageContext()) {
 }
 
 export {
-  jobApi
+  jobApi,
 };

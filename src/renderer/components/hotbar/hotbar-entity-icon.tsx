@@ -19,7 +19,9 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import React, { DOMAttributes } from "react";
+import styles from "./hotbar-entity-icon.module.css";
+
+import React, { HTMLAttributes } from "react";
 import { makeObservable, observable } from "mobx";
 import { observer } from "mobx-react";
 
@@ -30,12 +32,11 @@ import { navigate } from "../../navigation";
 import { cssNames, IClassName } from "../../utils";
 import { Icon } from "../icon";
 import { HotbarIcon } from "./hotbar-icon";
-import { HotbarStore } from "../../../common/hotbar-store";
+import { LensKubernetesClusterStatus } from "../../../common/catalog-entities/kubernetes-cluster";
 
-interface Props extends DOMAttributes<HTMLElement> {
+interface Props extends HTMLAttributes<HTMLElement> {
   entity: CatalogEntity;
   index: number;
-  className?: IClassName;
   errorClass?: IClassName;
   add: (item: CatalogEntity, index: number) => void;
   remove: (uid: string) => void;
@@ -44,22 +45,18 @@ interface Props extends DOMAttributes<HTMLElement> {
 
 @observer
 export class HotbarEntityIcon extends React.Component<Props> {
-  @observable private contextMenu: CatalogEntityContextMenuContext;
+  @observable private contextMenu: CatalogEntityContextMenuContext = {
+    menuItems: [],
+    navigate: (url: string) => navigate(url),
+  };
 
   constructor(props: Props) {
     super(props);
     makeObservable(this);
   }
 
-  componentDidMount() {
-    this.contextMenu = {
-      menuItems: [],
-      navigate: (url: string) => navigate(url),
-    };
-  }
-
   get kindIcon() {
-    const className = "badge";
+    const className = styles.badge;
     const category = catalogCategoryRegistry.getCategoryForEntity(this.props.entity);
 
     if (!category) {
@@ -78,7 +75,7 @@ export class HotbarEntityIcon extends React.Component<Props> {
       return null;
     }
 
-    const className = cssNames("led", { online: this.props.entity.status.phase == "connected"}); // TODO: make it more generic
+    const className = cssNames(styles.led, { [styles.online]: this.props.entity.status.phase === LensKubernetesClusterStatus.CONNECTED }); // TODO: make it more generic
 
     return <div className={className} />;
   }
@@ -87,8 +84,17 @@ export class HotbarEntityIcon extends React.Component<Props> {
     return catalogEntityRegistry.activeEntity?.metadata?.uid == item.getId();
   }
 
-  isPersisted(entity: CatalogEntity) {
-    return HotbarStore.getInstance().getActive().items.find((item) => item?.entity?.uid === entity.metadata.uid) !== undefined;
+  async onMenuOpen() {
+    const menuItems: CatalogEntityContextMenu[] = [];
+
+    menuItems.unshift({
+      title: "Remove from Hotbar",
+      onClick: () => this.props.remove(this.props.entity.metadata.uid),
+    });
+
+    this.contextMenu.menuItems = menuItems;
+
+    await this.props.entity.onContextMenuOpen(this.contextMenu);
   }
 
   render() {
@@ -96,37 +102,7 @@ export class HotbarEntityIcon extends React.Component<Props> {
       return null;
     }
 
-    const {
-      entity, errorClass, add, remove,
-      index, children, ...elemProps
-    } = this.props;
-    const className = cssNames("HotbarEntityIcon", this.props.className, {
-      interactive: true,
-      active: this.isActive(entity),
-      disabled: !entity
-    });
-
-    const isPersisted = this.isPersisted(entity);
-    const onOpen = async () => {
-      const menuItems: CatalogEntityContextMenu[] = [];
-
-      if (!isPersisted) {
-        menuItems.unshift({
-          title: "Pin to Hotbar",
-          onClick: () => add(entity, index)
-        });
-      } else {
-        menuItems.unshift({
-          title: "Unpin from Hotbar",
-          onClick: () => remove(entity.metadata.uid)
-        });
-      }
-
-      this.contextMenu.menuItems = menuItems;
-
-      await entity.onContextMenuOpen(this.contextMenu);
-    };
-    const isActive = this.isActive(entity);
+    const { entity, errorClass, add, remove, index, children, ...elemProps } = this.props;
 
     return (
       <HotbarIcon
@@ -136,9 +112,10 @@ export class HotbarEntityIcon extends React.Component<Props> {
         src={entity.spec.icon?.src}
         material={entity.spec.icon?.material}
         background={entity.spec.icon?.background}
-        className={className}
-        active={isActive}
-        onMenuOpen={onOpen}
+        className={this.props.className}
+        active={this.isActive(entity)}
+        onMenuOpen={() => this.onMenuOpen()}
+        disabled={!entity}
         menuItems={this.contextMenu.menuItems}
         tooltip={`${entity.metadata.name} (${entity.metadata.source})`}
         {...elemProps}

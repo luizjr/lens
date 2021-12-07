@@ -21,16 +21,21 @@
 
 import mockFs from "mock-fs";
 
-jest.mock("electron", () => {
-  return {
-    app: {
-      getVersion: () => "99.99.99",
-      getPath: () => "tmp",
-      getLocale: () => "en",
-      setLoginItemSettings: (): void => void 0,
-    }
-  };
-});
+jest.mock("electron", () => ({
+  app: {
+    getVersion: () => "99.99.99",
+    getName: () => "lens",
+    setName: jest.fn(),
+    setPath: jest.fn(),
+    getPath: () => "tmp",
+    getLocale: () => "en",
+    setLoginItemSettings: jest.fn(),
+  },
+  ipcMain: {
+    on: jest.fn(),
+    handle: jest.fn(),
+  },
+}));
 
 import { UserStore } from "../user-store";
 import { Console } from "console";
@@ -39,13 +44,15 @@ import electron from "electron";
 import { stdout, stderr } from "process";
 import { ThemeStore } from "../../renderer/theme.store";
 import type { ClusterStoreModel } from "../cluster-store";
+import { AppPaths } from "../app-paths";
 
 console = new Console(stdout, stderr);
+AppPaths.init();
 
 describe("user store tests", () => {
   describe("for an empty config", () => {
     beforeEach(() => {
-      mockFs({ tmp: { "config.json": "{}", "kube_config": "{}" } });
+      mockFs({ tmp: { "config.json": "{}", "kube_config": "{}" }});
 
       (UserStore.createInstance() as any).refreshNewContexts = jest.fn(() => Promise.resolve());
     });
@@ -99,7 +106,7 @@ describe("user store tests", () => {
           "config.json": JSON.stringify({
             user: { username: "foobar" },
             preferences: { colorTheme: "light" },
-            lastSeenAppVersion: "1.2.3"
+            lastSeenAppVersion: "1.2.3",
           }),
           "lens-cluster-store.json": JSON.stringify({
             clusters: [
@@ -111,15 +118,15 @@ describe("user store tests", () => {
                 id: "barfoo",
                 kubeConfigPath: "some/other/path",
               },
-            ]
+            ],
           } as ClusterStoreModel),
           "extension_data": {},
         },
         "some": {
           "other": {
             "path": "is file",
-          }
-        }
+          },
+        },
       });
 
       UserStore.createInstance();

@@ -34,6 +34,7 @@ export interface LensExtensionState {
 }
 
 export class ExtensionsStore extends BaseStore<LensExtensionsStoreModel> {
+  readonly displayName = "ExtensionsStore";
   constructor() {
     super({
       configName: "lens-extensions",
@@ -45,8 +46,8 @@ export class ExtensionsStore extends BaseStore<LensExtensionsStoreModel> {
   @computed
   get enabledExtensions() {
     return Array.from(this.state.values())
-      .filter(({enabled}) => enabled)
-      .map(({name}) => name);
+      .filter(({ enabled }) => enabled)
+      .map(({ name }) => name);
   }
 
   protected state = observable.map<LensExtensionId, LensExtensionState>();

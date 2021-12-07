@@ -24,9 +24,9 @@
   --small-size: 18px;
   --smallest-size: 16px;
   --big-size: 32px;
-  --color-active: #{$iconActiveColor};
-  --bgc-active: #{$iconActiveBackground};
-  --focus-color: var(--icon-focus-color, #{$lensBlue});
+  --color-active: var(--iconActiveColor);
+  --bgc-active: var(--iconActiveBackground);
+  --focus-color: var(--icon-focus-color, var(--blue));
 
   display: inline-flex;
   flex-shrink: 0;
@@ -119,17 +119,17 @@
   }
 
   &.sticker {
-    background: $colorOk;
-    color: $textColorAccent;
+    background: var(--colorOk);
+    color: var(--textColorAccent);
     border-radius: 50%;
     box-sizing: content-box;
     padding: $padding * 0.5;
   }
 
   &.active {
-    color: var(--color-active);
-    box-shadow: 0 0 0 2px $iconActiveBackground;
-    background-color: $iconActiveBackground;
+    color: var(--textColorAccent);
+    box-shadow: 0 0 0 2px var(--iconActiveBackground);
+    background-color: var(--iconActiveBackground);
   }
 
   &.interactive {
@@ -137,16 +137,8 @@
     transition: 250ms color, 250ms opacity, 150ms background-color, 150ms box-shadow;
     border-radius: var(--border-radius);
 
-    &.focusable:focus:not(:hover) {
+    &.focusable:focus-visible {
       box-shadow: 0 0 0 2px var(--focus-color);
-
-      [data-whatintent='mouse'] & {
-        box-shadow: none;
-
-        &.active {
-          box-shadow: 0 0 0 2px $iconActiveBackground;
-        }
-      }
     }
 
     &:hover {

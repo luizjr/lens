@@ -57,9 +57,7 @@ export class CrdResources extends React.Component<Props> {
   }
 
   @computed get store() {
-    if (!this.crd) return null;
-
-    return apiManager.getStore(this.crd.getResourceApiBase());
+    return apiManager.getStore(this.crd?.getResourceApiBase());
   }
 
   render() {
@@ -78,6 +76,17 @@ export class CrdResources extends React.Component<Props> {
       sortingCallbacks[column.name] = item => jsonPath.value(item, parseJsonPath(column.jsonPath.slice(1)));
     });
 
+    const version = crd.getPreferedVersion();
+    const loadFailedPrefix = <p>Failed to load {crd.getPluralName()}</p>;
+    const failedToLoadMessage = version.served
+      ? loadFailedPrefix
+      : (
+        <>
+          {loadFailedPrefix}
+          <p>Prefered version ({crd.getGroup()}/{version.name}) is not served</p>
+        </>
+      );
+
     return (
       <KubeObjectListLayout
         isConfigurable
@@ -89,13 +98,13 @@ export class CrdResources extends React.Component<Props> {
         searchFilters={[
           item => item.getSearchFields(),
         ]}
-        renderHeaderTitle={crd.getResourceTitle()}
+        renderHeaderTitle={crd.getResourceKind()}
         customizeHeader={({ searchProps, ...headerPlaceholders }) => ({
           searchProps: {
             ...searchProps,
-            placeholder: `Search ${crd.getResourceTitle()}...`,
+            placeholder: `${crd.getResourceKind()} search ...`,
           },
-          ...headerPlaceholders
+          ...headerPlaceholders,
         })}
         renderTableHeader={[
           { title: "Name", className: "name", sortBy: columnId.name, id: columnId.name },
@@ -107,7 +116,7 @@ export class CrdResources extends React.Component<Props> {
               title: name,
               className: name.toLowerCase(),
               sortBy: name,
-              id: name
+              id: name,
             };
           }),
           { title: "Age", className: "age", sortBy: columnId.age, id: columnId.age },
@@ -129,6 +138,7 @@ export class CrdResources extends React.Component<Props> {
           }),
           crdInstance.getAge(),
         ]}
+        failedToLoadMessage={failedToLoadMessage}
       />
     );
   }

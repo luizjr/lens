@@ -26,7 +26,7 @@ import { multiSet } from "../utils";
 import { UserStore } from "../../common/user-store";
 import { getAllEntries } from "../components/+preferences/kubeconfig-syncs";
 import { runInAction } from "mobx";
-import { isWindows } from "../../common/vars";
+import { isLinux, isWindows } from "../../common/vars";
 import { PathPicker } from "../components/path-picker";
 import { Notifications } from "../components/notifications";
 import { Link } from "react-router-dom";
@@ -43,7 +43,7 @@ async function addSyncEntries(filePaths: string[]) {
       <p>Selected items has been added to Kubeconfig Sync.</p><br/>
       <p>Check the <Link style={{ textDecoration: "underline" }} to={`${kubernetesURL()}#kube-sync`}>Preferences</Link>{" "}
       to see full list.</p>
-    </div>
+    </div>,
   );
 }
 
@@ -57,7 +57,7 @@ export function initCatalogCategoryRegistryEntries() {
       },
     );
 
-    if (isWindows) {
+    if (isWindows || isLinux) {
       ctx.menuItems.push(
         {
           icon: "create_new_folder",

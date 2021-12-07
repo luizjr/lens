@@ -26,13 +26,8 @@ export default {
     getLocale: jest.fn().mockRejectedValue("en"),
     getPath: jest.fn(() => "tmp"),
   },
-  remote: {
-    app: {
-      getPath: jest.fn()
-    }
-  },
   dialog: jest.fn(),
   ipcRenderer: {
-    on: jest.fn()
-  }
+    on: jest.fn(),
+  },
 };

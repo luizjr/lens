@@ -19,22 +19,36 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import jsYaml from "js-yaml";
+import yaml from "js-yaml";
 import type { KubeJsonApiData } from "../kube-json-api";
 import { apiBase } from "../index";
+import type { Patch } from "rfc6902";
 
-export const resourceApplierApi = {
-  annotations: [
-    "kubectl.kubernetes.io/last-applied-configuration"
-  ],
+export const annotations = [
+  "kubectl.kubernetes.io/last-applied-configuration",
+];
 
-  async update(resource: object | string): Promise<KubeJsonApiData | null> {
-    if (typeof resource === "string") {
-      resource = jsYaml.safeLoad(resource);
+export async function update(resource: object | string): Promise<KubeJsonApiData> {
+  if (typeof resource === "string") {
+    const parsed = yaml.load(resource);
+
+    if (typeof parsed !== "object") {
+      throw new Error("Cannot update resource to string or number");
     }
 
-    const [data = null] = await apiBase.post<KubeJsonApiData[]>("/stack", { data: resource });
-
-    return data;
+    resource = parsed;
   }
-};
+
+  return apiBase.post<KubeJsonApiData>("/stack", { data: resource });
+}
+
+export async function patch(name: string, kind: string, ns: string, patch: Patch): Promise<KubeJsonApiData> {
+  return apiBase.patch<KubeJsonApiData>("/stack", {
+    data: {
+      name,
+      kind,
+      ns,
+      patch,
+    },
+  });
+}

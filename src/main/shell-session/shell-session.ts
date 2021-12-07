@@ -19,18 +19,22 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import fse from "fs-extra";
 import type { Cluster } from "../cluster";
 import { Kubectl } from "../kubectl";
-import type * as WebSocket from "ws";
+import type WebSocket from "ws";
 import { shellEnv } from "../utils/shell-env";
 import { app } from "electron";
 import { clearKubeconfigEnvVars } from "../utils/clear-kube-env-vars";
 import path from "path";
-import { isWindows } from "../../common/vars";
+import os from "os";
+import { isMac, isWindows } from "../../common/vars";
 import { UserStore } from "../../common/user-store";
 import * as pty from "node-pty";
 import { appEventBus } from "../../common/event-bus";
+import logger from "../logger";
+import { TerminalChannels, TerminalMessage } from "../../renderer/api/terminal-api";
+import { deserialize, serialize } from "v8";
+import { stat } from "fs/promises";
 
 export class ShellOpenError extends Error {
   constructor(message: string, public cause: Error) {
@@ -40,79 +44,257 @@ export class ShellOpenError extends Error {
   }
 }
 
+export enum WebSocketCloseEvent {
+  /**
+   * The connection successfully completed the purpose for which it was created.
+   */
+  NormalClosure = 1000,
+  /**
+   * The endpoint is going away, either because of a server failure or because
+   * the browser is navigating away from the page that opened the connection.
+   */
+  GoingAway = 1001,
+  /**
+   * The endpoint is terminating the connection due to a protocol error.
+   */
+  ProtocolError = 1002,
+  /**
+   * The connection is being terminated because the endpoint received data of a
+   * type it cannot accept. (For example, a text-only endpoint received binary
+   * data.)
+   */
+  UnsupportedData = 1003,
+  /**
+   * Indicates that no status code was provided even though one was expected.
+   */
+  NoStatusReceived = 1005,
+  /**
+   * Indicates that a connection was closed abnormally (that is, with no close
+   * frame being sent) when a status code is expected.
+   */
+  AbnormalClosure = 1006,
+  /**
+   *  The endpoint is terminating the connection because a message was received
+   * that contained inconsistent data (e.g., non-UTF-8 data within a text message).
+   */
+  InvalidFramePayloadData = 1007,
+  /**
+   * The endpoint is terminating the connection because it received a message
+   * that violates its policy. This is a generic status code, used when codes
+   * 1003 and 1009 are not suitable.
+   */
+  PolicyViolation = 1008,
+  /**
+   * The endpoint is terminating the connection because a data frame was
+   * received that is too large.
+   */
+  MessageTooBig = 1009,
+  /**
+   * The client is terminating the connection because it expected the server to
+   * negotiate one or more extension, but the server didn't.
+   */
+  MissingExtension = 1010,
+  /**
+   * The server is terminating the connection because it encountered an
+   * unexpected condition that prevented it from fulfilling the request.
+   */
+  InternalError = 1011,
+  /**
+   * The server is terminating the connection because it is restarting.
+   */
+  ServiceRestart = 1012,
+  /**
+   * The server is terminating the connection due to a temporary condition,
+   * e.g. it is overloaded and is casting off some of its clients.
+   */
+  TryAgainLater = 1013,
+  /**
+   * The server was acting as a gateway or proxy and received an invalid
+   * response from the upstream server. This is similar to 502 HTTP Status Code.
+   */
+  BadGateway = 1014,
+  /**
+   * Indicates that the connection was closed due to a failure to perform a TLS
+   * handshake (e.g., the server certificate can't be verified).
+   */
+  TlsHandshake = 1015,
+}
+
 export abstract class ShellSession {
   abstract ShellType: string;
 
-  static shellEnvs: Map<string, Record<string, any>> = new Map();
+  private static shellEnvs = new Map<string, Record<string, string>>();
+  private static processes = new Map<string, pty.IPty>();
+
+  /**
+   * Kill all remaining shell backing processes. Should be called when about to
+   * quit
+   */
+  public static cleanup(): void {
+    for (const shellProcess of this.processes.values()) {
+      try {
+        process.kill(shellProcess.pid);
+      } catch {}
+    }
+
+    this.processes.clear();
+  }
 
   protected kubectl: Kubectl;
   protected running = false;
-  protected shellProcess: pty.IPty;
   protected kubectlBinDirP: Promise<string>;
   protected kubeconfigPathP: Promise<string>;
+  protected readonly terminalId: string;
 
   protected abstract get cwd(): string | undefined;
 
-  constructor(protected websocket: WebSocket, protected cluster: Cluster) {
+  protected ensureShellProcess(shell: string, args: string[], env: Record<string, string>, cwd: string): { shellProcess: pty.IPty, resume: boolean } {
+    const resume = ShellSession.processes.has(this.terminalId);
+
+    if (!resume) {
+      ShellSession.processes.set(this.terminalId, pty.spawn(shell, args, {
+        rows: 30,
+        cols: 80,
+        cwd,
+        env,
+        name: "xterm-256color",
+      }));
+    }
+
+    const shellProcess = ShellSession.processes.get(this.terminalId);
+
+    logger.info(`[SHELL-SESSION]: PTY for ${this.terminalId} is ${resume ? "resumed" : "started"} with PID=${shellProcess.pid}`);
+
+    return { shellProcess, resume };
+  }
+
+  constructor(protected websocket: WebSocket, protected cluster: Cluster, terminalId: string) {
     this.kubectl = new Kubectl(cluster.version);
     this.kubeconfigPathP = this.cluster.getProxyKubeconfigPath();
     this.kubectlBinDirP = this.kubectl.binDir();
+    this.terminalId = `${cluster.id}:${terminalId}`;
   }
 
-  protected async open(shell: string, args: string[], env: Record<string, any>) {
-    const cwd = (this.cwd && await fse.pathExists(this.cwd))
-    	? this.cwd
-    	: env.HOME;
+  protected send(message: TerminalMessage): void {
+    this.websocket.send(serialize(message));
+  }
 
-    this.shellProcess = pty.spawn(shell, args, {
-      cols: 80,
-      cwd,
-      env,
-      name: "xterm-256color",
-      rows: 30,
-    });
-    this.running = true;
+  protected async getCwd(env: Record<string, string>): Promise<string> {
+    const cwdOptions = [this.cwd];
 
-    this.shellProcess.onData(data => this.sendResponse(data));
-    this.shellProcess.onExit(({ exitCode }) => {
-      this.running = false;
+    if (isWindows) {
+      cwdOptions.push(
+        env.USERPROFILE,
+        os.homedir(),
+        "C:\\",
+      );
+    } else {
+      cwdOptions.push(
+        env.HOME,
+        os.homedir(),
+      );
 
-      if (exitCode > 0) {
-        this.sendResponse("Terminal will auto-close in 15 seconds ...");
-        setTimeout(() => this.exit(), 15 * 1000);
+      if (isMac) {
+        cwdOptions.push("/Users");
       } else {
-        this.exit();
+        cwdOptions.push("/home");
+      }
+    }
+
+    for (const potentialCwd of cwdOptions) {
+      if (!potentialCwd) {
+        continue;
+      }
+
+      try {
+        const stats = await stat(potentialCwd);
+
+        if (stats.isDirectory()) {
+          return potentialCwd;
+        }
+      } catch {}
+    }
+
+    return "."; // Always valid
+  }
+
+  protected async openShellProcess(shell: string, args: string[], env: Record<string, string>) {
+    const cwd = await this.getCwd(env);
+    const { shellProcess, resume } = this.ensureShellProcess(shell, args, env, cwd);
+
+    if (resume) {
+      this.send({ type: TerminalChannels.CONNECTED });
+    }
+
+    this.running = true;
+    shellProcess.onData(data => this.send({ type: TerminalChannels.STDOUT, data }));
+    shellProcess.onExit(({ exitCode }) => {
+      logger.info(`[SHELL-SESSION]: shell has exited for ${this.terminalId} closed with exitcode=${exitCode}`);
+
+      // This might already be false because of the kill() within the websocket.on("close") handler
+      if (this.running) {
+        this.running = false;
+
+        if (exitCode > 0) {
+          this.send({ type: TerminalChannels.STDOUT, data: "Terminal will auto-close in 15 seconds ..." });
+          setTimeout(() => this.exit(), 15 * 1000);
+        } else {
+          this.exit();
+        }
       }
     });
 
     this.websocket
-      .on("message", (data: string) => {
+      .on("message", (data: string | Uint8Array) => {
         if (!this.running) {
-          return;
+          return void logger.debug(`[SHELL-SESSION]: received message from ${this.terminalId}, but shellProcess isn't running`);
         }
 
-        const message = Buffer.from(data.slice(1, data.length), "base64").toString();
+        if (typeof data === "string") {
+          return void logger.silly(`[SHELL-SESSION]: Received message from ${this.terminalId}`, { data });
+        }
 
-        switch (data[0]) {
-          case "0":
-            this.shellProcess.write(message);
-            break;
-          case "4":
-            const { Width, Height } = JSON.parse(message);
+        try {
+          const message: TerminalMessage = deserialize(data);
 
-            this.shellProcess.resize(Width, Height);
-            break;
+          switch (message.type) {
+            case TerminalChannels.STDIN:
+              shellProcess.write(message.data);
+              break;
+            case TerminalChannels.RESIZE:
+              shellProcess.resize(message.data.width, message.data.height);
+              break;
+            default:
+              logger.warn(`[SHELL-SESSION]: unknown or unhandleable message type for ${this.terminalId}`, message);
+              break;
+          }
+        } catch (error) {
+          logger.error(`[SHELL-SESSION]: failed to handle message for ${this.terminalId}`, error);
         }
       })
-      .on("close", () => {
-        if (this.running) {
+      .on("close", code => {
+        logger.info(`[SHELL-SESSION]: websocket for ${this.terminalId} closed with code=${WebSocketCloseEvent[code]}(${code})`, { cluster: this.cluster.getMeta() });
+
+        const stopShellSession = this.running
+          && (
+            (
+              code !== WebSocketCloseEvent.AbnormalClosure
+              && code !== WebSocketCloseEvent.GoingAway
+            )
+            || this.cluster.disconnected
+          );
+
+        if (stopShellSession) {
+          this.running = false;
+
           try {
-            process.kill(this.shellProcess.pid);
-          } catch (e) {
+            logger.info(`[SHELL-SESSION]: Killing shell process (pid=${shellProcess.pid}) for ${this.terminalId}`);
+            shellProcess.kill();
+            ShellSession.processes.delete(this.terminalId);
+          } catch (error) {
+            logger.warn(`[SHELL-SESSION]: failed to kill shell process (pid=${shellProcess.pid}) for ${this.terminalId}`, error);
           }
         }
-
-        this.running = false;
       });
 
     appEventBus.emit({ name: this.ShellType, action: "open" });
@@ -154,7 +336,7 @@ export abstract class ShellSession {
       env.LENS_SESSION = "true";
       env.WSLENV = [
         process.env.WSLENV,
-        "KUBECONFIG/up:LENS_SESSION/u"
+        "KUBECONFIG/up:LENS_SESSION/u",
       ]
         .filter(Boolean)
         .join(":");
@@ -183,7 +365,7 @@ export abstract class ShellSession {
     env.NO_PROXY = [
       "localhost",
       "127.0.0.1",
-      env.NO_PROXY
+      env.NO_PROXY,
     ]
       .filter(Boolean)
       .join();
@@ -191,13 +373,9 @@ export abstract class ShellSession {
     return env;
   }
 
-  protected exit(code = 1000) {
+  protected exit(code = WebSocketCloseEvent.NormalClosure) {
     if (this.websocket.readyState == this.websocket.OPEN) {
       this.websocket.close(code);
     }
-  }
-
-  protected sendResponse(msg: string) {
-    this.websocket.send(`1${Buffer.from(msg).toString("base64")}`);
   }
 }

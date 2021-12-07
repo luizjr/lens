@@ -19,21 +19,19 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import { app } from "electron";
-import semver from "semver";
-import { action, computed, observable, reaction, makeObservable } from "mobx";
+import { app, ipcMain } from "electron";
+import semver, { SemVer } from "semver";
+import { action, computed, makeObservable, observable, reaction } from "mobx";
 import { BaseStore } from "../base-store";
-import migrations from "../../migrations/user-store";
+import migrations, { fileNameMigration } from "../../migrations/user-store";
 import { getAppVersion } from "../utils/app-version";
 import { kubeConfigDefaultPath } from "../kube-helpers";
 import { appEventBus } from "../event-bus";
 import path from "path";
-import { fileNameMigration } from "../../migrations/user-store";
 import { ObservableToggleSet, toJS } from "../../renderer/utils";
-import { DESCRIPTORS, KubeconfigSyncValue, UserPreferencesModel, EditorConfiguration } from "./preferences-helpers";
+import { DESCRIPTORS, EditorConfiguration, KubeconfigSyncValue, UserPreferencesModel } from "./preferences-helpers";
 import logger from "../../main/logger";
-import type { monaco } from "react-monaco-editor";
-import { getPath } from "../utils/getPath";
+import { AppPaths } from "../app-paths";
 
 export interface UserStoreModel {
   lastSeenAppVersion: string;
@@ -41,6 +39,7 @@ export interface UserStoreModel {
 }
 
 export class UserStore extends BaseStore<UserStoreModel> /* implements UserStoreFlatModel (when strict null is enabled) */ {
+  readonly displayName = "UserStore";
   constructor() {
     super({
       configName: "lens-user-store",
@@ -48,7 +47,11 @@ export class UserStore extends BaseStore<UserStoreModel> /* implements UserStore
     });
 
     makeObservable(this);
-    fileNameMigration();
+
+    if (ipcMain) {
+      fileNameMigration();
+    }
+
     this.load();
   }
 
@@ -71,6 +74,7 @@ export class UserStore extends BaseStore<UserStoreModel> /* implements UserStore
   @observable downloadBinariesPath?: string;
   @observable kubectlBinariesPath?: string;
   @observable terminalCopyOnSelect: boolean;
+  @observable updateChannel?: string;
 
   /**
    * Download kubectl binaries matching cluster version
@@ -87,7 +91,7 @@ export class UserStore extends BaseStore<UserStoreModel> /* implements UserStore
   /**
    * Monaco editor configs
    */
-   @observable editorConfiguration:EditorConfiguration = {tabSize: null, miniMap: null, lineNumbers: null};
+  @observable editorConfiguration: EditorConfiguration;
 
   /**
    * The set of file/folder paths to be synced
@@ -102,6 +106,10 @@ export class UserStore extends BaseStore<UserStoreModel> /* implements UserStore
     return this.shell || process.env.SHELL || process.env.PTYSHELL;
   }
 
+  @computed get isAllowedToDowngrade() {
+    return new SemVer(getAppVersion()).prerelease[0] !== this.updateChannel;
+  }
+
   startMainReactions() {
     // track telemetry availability
     reaction(() => this.allowTelemetry, allowed => {
@@ -113,33 +121,11 @@ export class UserStore extends BaseStore<UserStoreModel> /* implements UserStore
       app.setLoginItemSettings({
         openAtLogin,
         openAsHidden: true,
-        args: ["--hidden"]
+        args: ["--hidden"],
       });
     }, {
       fireImmediately: true,
     });
-  }
-
-  // Returns monaco editor options for selected editor type (the place, where a particular instance of the editor is mounted)
-  getEditorOptions(): monaco.editor.IStandaloneEditorConstructionOptions {
-    return {
-      automaticLayout: true,
-      tabSize: this.editorConfiguration.tabSize,
-      minimap: this.editorConfiguration.miniMap,
-      lineNumbers: this.editorConfiguration.lineNumbers
-    };
-  }
-
-  setEditorLineNumbers(lineNumbers: monaco.editor.LineNumbersType) {
-    this.editorConfiguration.lineNumbers = lineNumbers;
-  }
-
-  setEditorTabSize(tabSize: number) {
-    this.editorConfiguration.tabSize = tabSize;
-  }
-
-  enableEditorMinimap(miniMap: boolean ) {
-    this.editorConfiguration.miniMap.enabled = miniMap;
   }
 
   /**
@@ -214,6 +200,7 @@ export class UserStore extends BaseStore<UserStoreModel> /* implements UserStore
     this.syncKubeconfigEntries.replace(DESCRIPTORS.syncKubeconfigEntries.fromStore(preferences?.syncKubeconfigEntries));
     this.editorConfiguration = DESCRIPTORS.editorConfiguration.fromStore(preferences?.editorConfiguration);
     this.terminalCopyOnSelect = DESCRIPTORS.terminalCopyOnSelect.fromStore(preferences?.terminalCopyOnSelect);
+    this.updateChannel = DESCRIPTORS.updateChannel.fromStore(preferences?.updateChannel);
   }
 
   toJSON(): UserStoreModel {
@@ -236,6 +223,7 @@ export class UserStore extends BaseStore<UserStoreModel> /* implements UserStore
         syncKubeconfigEntries: DESCRIPTORS.syncKubeconfigEntries.toStore(this.syncKubeconfigEntries),
         editorConfiguration: DESCRIPTORS.editorConfiguration.toStore(this.editorConfiguration),
         terminalCopyOnSelect: DESCRIPTORS.terminalCopyOnSelect.toStore(this.terminalCopyOnSelect),
+        updateChannel: DESCRIPTORS.updateChannel.toStore(this.updateChannel),
       },
     };
 
@@ -248,5 +236,5 @@ export class UserStore extends BaseStore<UserStoreModel> /* implements UserStore
  * @returns string
  */
 export function getDefaultKubectlDownloadPath(): string {
-  return path.join(getPath("userData"), "binaries");
+  return path.join(AppPaths.get("userData"), "binaries");
 }

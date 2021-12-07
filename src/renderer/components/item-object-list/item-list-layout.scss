@@ -20,7 +20,7 @@
  */
 
 .ItemListLayout {
-  background: $contentColor;
+  background: var(--contentColor);
   height: 100%;
 
   > .header {
@@ -49,22 +49,11 @@
     position: relative;
     min-height: 200px;
   }
-
-  .TableCell {
-    &.menu {
-      @include table-cell-action;
-    }
-  }
 }
 
 .ItemListLayoutVisibilityMenu {
-  .MenuItem {
-    padding: 0;
-  }
-
   .Checkbox {
-    width: 100%;
-    padding: var(--spacing);
-    cursor: pointer;
+    --checkbox-color: inherit;
+    color: var(--checkbox-color);
   }
 }

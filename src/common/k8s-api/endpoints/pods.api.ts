@@ -46,6 +46,8 @@ export function getMetricsForPods(pods: Pod[], namespace: string, selector = "po
     memoryRequests: opts,
     memoryLimits: opts,
     fsUsage: opts,
+    fsWrites: opts,
+    fsReads: opts,
     networkReceive: opts,
     networkTransmit: opts,
   }, {
@@ -57,7 +59,9 @@ export interface IPodMetrics<T = IMetrics> {
   [metric: string]: T;
   cpuUsage: T;
   memoryUsage: T;
-  fsUsage: T;
+  fsUsage: T,
+  fsWrites: T,
+  fsReads: T,
   networkReceive: T;
   networkTransmit: T;
   cpuRequests?: T;
@@ -82,10 +86,10 @@ export enum PodStatus {
   PENDING = "Pending",
   RUNNING = "Running",
   SUCCEEDED = "Succeeded",
-  EVICTED = "Evicted"
+  EVICTED = "Evicted",
 }
 
-export interface IPodContainer {
+export interface IPodContainer extends Partial<Record<PodContainerProbe, IContainerProbe>> {
   name: string;
   image: string;
   command?: string[];
@@ -136,16 +140,19 @@ export interface IPodContainer {
     readOnly: boolean;
     mountPath: string;
   }[];
-  livenessProbe?: IContainerProbe;
-  readinessProbe?: IContainerProbe;
-  startupProbe?: IContainerProbe;
   imagePullPolicy: string;
 }
+
+export type PodContainerProbe = "livenessProbe" | "readinessProbe" | "startupProbe";
 
 interface IContainerProbe {
   httpGet?: {
     path?: string;
-    port: number;
+
+    /**
+     * either a port number or an IANA_SVC_NAME string referring to a port defined in the container
+     */
+    port: number | string;
     scheme: string;
     host?: string;
   };
@@ -162,40 +169,40 @@ interface IContainerProbe {
   failureThreshold?: number;
 }
 
+export interface ContainerStateRunning {
+  startedAt: string;
+}
+
+export interface ContainerStateWaiting {
+  reason: string;
+  message: string;
+}
+
+export interface ContainerStateTerminated {
+  startedAt: string;
+  finishedAt: string;
+  exitCode: number;
+  reason: string;
+  containerID?: string;
+  message?: string;
+  signal?: number;
+}
+
+/**
+ * ContainerState holds a possible state of container. Only one of its members
+ * may be specified. If none of them is specified, the default one is
+ * `ContainerStateWaiting`.
+ */
+export interface ContainerState {
+  running?: ContainerStateRunning;
+  waiting?: ContainerStateWaiting;
+  terminated?: ContainerStateTerminated;
+}
+
 export interface IPodContainerStatus {
   name: string;
-  state?: {
-    [index: string]: object;
-    running?: {
-      startedAt: string;
-    };
-    waiting?: {
-      reason: string;
-      message: string;
-    };
-    terminated?: {
-      startedAt: string;
-      finishedAt: string;
-      exitCode: number;
-      reason: string;
-    };
-  };
-  lastState?: {
-    [index: string]: object;
-    running?: {
-      startedAt: string;
-    };
-    waiting?: {
-      reason: string;
-      message: string;
-    };
-    terminated?: {
-      startedAt: string;
-      finishedAt: string;
-      exitCode: number;
-      reason: string;
-    };
-  };
+  state?: ContainerState;
+  lastState?: ContainerState;
   ready: boolean;
   restartCount: number;
   image: string;
@@ -307,7 +314,7 @@ export class Pod extends WorkloadKubeObject {
     const runningContainerNames = new Set(
       this.getContainerStatuses()
         .filter(({ state }) => state.running)
-        .map(({ name }) => name)
+        .map(({ name }) => name),
     );
 
     return this.getAllContainers()
@@ -370,23 +377,16 @@ export class Pod extends WorkloadKubeObject {
   }
 
   // Returns pod phase or container error if occurred
-  getStatusMessage() {
-    if (this.getReason() === PodStatus.EVICTED) return "Evicted";
-    if (this.metadata.deletionTimestamp) return "Terminating";
-
-    const statuses = this.getContainerStatuses(false); // not including initContainers
-
-    for (const { state } of statuses.reverse()) {
-      if (state.waiting) {
-        return state.waiting.reason || "Waiting";
-      }
-
-      if (state.terminated) {
-        return state.terminated.reason || "Terminated";
-      }
+  getStatusMessage(): string {
+    if (this.getReason() === PodStatus.EVICTED) {
+      return "Evicted";
     }
 
-    return this.getStatusPhase();
+    if (this.metadata.deletionTimestamp) {
+      return "Terminating";
+    }
+
+    return this.getStatusPhase() || "Waiting";
   }
 
   getStatusPhase() {
@@ -408,7 +408,7 @@ export class Pod extends WorkloadKubeObject {
   }
 
   getNodeSelectors(): string[] {
-    const { nodeSelector = {} } = this.spec;
+    const { nodeSelector = {}} = this.spec;
 
     return Object.entries(nodeSelector).map(values => values.join(": "));
   }
@@ -438,50 +438,64 @@ export class Pod extends WorkloadKubeObject {
   }
 
   getLivenessProbe(container: IPodContainer) {
-    return this.getProbe(container.livenessProbe);
+    return this.getProbe(container, "livenessProbe");
   }
 
   getReadinessProbe(container: IPodContainer) {
-    return this.getProbe(container.readinessProbe);
+    return this.getProbe(container, "readinessProbe");
   }
 
   getStartupProbe(container: IPodContainer) {
-    return this.getProbe(container.startupProbe);
+    return this.getProbe(container, "startupProbe");
   }
 
-  getProbe(probeData: IContainerProbe) {
-    if (!probeData) return [];
+  private getProbe(container: IPodContainer, field: PodContainerProbe): string[] {
+    const probe: string[] = [];
+    const probeData = container[field];
+
+    if (!probeData) {
+      return probe;
+    }
+
     const {
-      httpGet, exec, tcpSocket, initialDelaySeconds, timeoutSeconds,
-      periodSeconds, successThreshold, failureThreshold
+      httpGet, exec, tcpSocket,
+      initialDelaySeconds = 0,
+      timeoutSeconds = 0,
+      periodSeconds = 0,
+      successThreshold = 0,
+      failureThreshold = 0,
     } = probeData;
-    const probe = [];
 
     // HTTP Request
     if (httpGet) {
-      const { path, port, host, scheme } = httpGet;
+      const { path = "", port, host = "", scheme } = httpGet;
+      const resolvedPort = typeof port === "number"
+        ? port
+        // Try and find the port number associated witht the name or fallback to the name itself
+        : container.ports?.find(containerPort => containerPort.name === port)?.containerPort || port;
 
       probe.push(
         "http-get",
-        `${scheme.toLowerCase()}://${host || ""}:${port || ""}${path || ""}`,
+        `${scheme.toLowerCase()}://${host}:${resolvedPort}${path}`,
       );
     }
 
     // Command
-    if (exec && exec.command) {
+    if (exec?.command) {
       probe.push(`exec [${exec.command.join(" ")}]`);
     }
 
     // TCP Probe
-    if (tcpSocket && tcpSocket.port) {
+    if (tcpSocket?.port) {
       probe.push(`tcp-socket :${tcpSocket.port}`);
     }
+
     probe.push(
-      `delay=${initialDelaySeconds || "0"}s`,
-      `timeout=${timeoutSeconds || "0"}s`,
-      `period=${periodSeconds || "0"}s`,
-      `#success=${successThreshold || "0"}`,
-      `#failure=${failureThreshold || "0"}`,
+      `delay=${initialDelaySeconds}s`,
+      `timeout=${timeoutSeconds}s`,
+      `period=${periodSeconds}s`,
+      `#success=${successThreshold}`,
+      `#failure=${failureThreshold}`,
     );
 
     return probe;
@@ -512,5 +526,5 @@ if (isClusterPageContext()) {
 }
 
 export {
-  podsApi
+  podsApi,
 };

@@ -27,7 +27,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 
 import { secretsStore } from "../../+config-secrets/secrets.store";
-import { Secret, ServiceAccount } from "../../../../common/k8s-api/endpoints";
+import { Secret, SecretType, ServiceAccount } from "../../../../common/k8s-api/endpoints";
 import { DrawerItem, DrawerTitle } from "../../drawer";
 import { Icon } from "../../icon";
 import type { KubeObjectDetailsProps } from "../../kube-object-details";
@@ -59,7 +59,7 @@ export class ServiceAccountsDetails extends React.Component<Props> {
     });
 
     this.secrets = await Promise.all(secrets);
-    const imagePullSecrets = serviceAccount.getImagePullSecrets().map(async({ name }) => {
+    const imagePullSecrets = serviceAccount.getImagePullSecrets().map(async ({ name }) => {
       return secretsStore.load({ name, namespace }).catch(() => this.generateDummySecretObject(name));
     });
 
@@ -79,7 +79,7 @@ export class ServiceAccountsDetails extends React.Component<Props> {
     }
 
     return secrets.map(secret =>
-      <ServiceAccountsSecret key={secret.getId()} secret={secret}/>
+      <ServiceAccountsSecret key={secret.getId()} secret={secret}/>,
     );
   }
 
@@ -123,8 +123,9 @@ export class ServiceAccountsDetails extends React.Component<Props> {
         name,
         uid: null,
         selfLink: null,
-        resourceVersion: null
-      }
+        resourceVersion: null,
+      },
+      type: SecretType.Opaque,
     });
   }
 
@@ -136,7 +137,7 @@ export class ServiceAccountsDetails extends React.Component<Props> {
     }
     const tokens = secretsStore.items.filter(secret =>
       secret.getNs() == serviceAccount.getNs() &&
-      secret.getAnnotations().some(annot => annot == `kubernetes.io/service-account.name: ${serviceAccount.getName()}`)
+      secret.getAnnotations().some(annot => annot == `kubernetes.io/service-account.name: ${serviceAccount.getName()}`),
     );
     const imagePullSecrets = serviceAccount.getImagePullSecrets();
 

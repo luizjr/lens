@@ -28,23 +28,24 @@ export function noop<T extends any[]>(...args: T): void {
 
 export * from "./app-version";
 export * from "./autobind";
-export * from "./base64";
 export * from "./camelCase";
 export * from "./cloneJson";
 export * from "./cluster-id-url-parsing";
+export * from "./convertCpu";
+export * from "./convertMemory";
 export * from "./debouncePromise";
 export * from "./defineGlobal";
 export * from "./delay";
 export * from "./disposer";
 export * from "./downloadFile";
-export * from "./formatDuration";
 export * from "./escapeRegExp";
 export * from "./extended-map";
-export * from "./getPath";
+export * from "./formatDuration";
 export * from "./getRandId";
 export * from "./hash-set";
 export * from "./local-kubeconfig";
 export * from "./n-fircate";
+export * from "./objects";
 export * from "./openExternal";
 export * from "./paths";
 export * from "./reject-promise";
@@ -56,9 +57,15 @@ export * from "./toggle-set";
 export * from "./toJS";
 export * from "./type-narrowing";
 export * from "./types";
-export * from "./convertMemory";
-export * from "./convertCpu";
 
 import * as iter from "./iter";
+import * as array from "./array";
+import * as tuple from "./tuple";
+import * as base64 from "./base64";
 
-export { iter };
+export {
+  iter,
+  array,
+  tuple,
+  base64,
+};

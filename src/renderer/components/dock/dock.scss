@@ -20,12 +20,20 @@
  */
 
 .Dock {
-  $borderColor: $borderColor;
-
   position: relative;
-  background: $dockHeadBackground;
+  background: var(--dockHeadBackground);
   display: flex;
   flex-direction: column;
+
+  &:not(:focus-within) .DockTab.active {
+    &::after {
+      color: var(--halfGray);
+    }
+
+    &:hover::after {
+      color: var(--line-color-active);
+    }
+  }
 
   &.isOpen {
     &.fullSize {
@@ -52,7 +60,7 @@
 
   .tabs-container {
     padding: 0 $padding * 2;
-    border-top: 1px solid $borderColor;
+    border-top: 1px solid var(--borderColor);
     flex-shrink: 0;
 
     .Tabs:empty + .toolbar {
@@ -68,10 +76,10 @@
 
   .tab-content {
     position: relative;
-    background: $terminalBackground;
+    background: var(--terminalBackground);
     flex: 1;
     overflow: hidden;
-    transition: flex 60ms ease-in-out;
+    transition: flex-basis 25ms ease-in;
 
     > *:not(.Spinner) {
       position: absolute;
@@ -80,9 +88,5 @@
       right: 0;
       bottom: 0;
     }
-  }
-
-  .MonacoEditor {
-    border: none;
   }
 }

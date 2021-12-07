@@ -105,8 +105,8 @@ export abstract class CatalogCategory extends (EventEmitter as new () => TypedEm
       iter.reduce(
         this.filters,
         iter.filter,
-        menuItems,
-      )
+        menuItems.values(),
+      ),
     );
   }
 }
@@ -172,7 +172,10 @@ export interface CatalogEntitySettingsMenu {
 }
 
 export interface CatalogEntityContextMenuContext {
-  navigate: (url: string) => void;
+  /**
+   * Navigate to the specified pathname
+   */
+  navigate: (pathname: string) => void;
   menuItems: CatalogEntityContextMenu[];
 }
 

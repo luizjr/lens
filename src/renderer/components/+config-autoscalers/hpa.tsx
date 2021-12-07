@@ -40,7 +40,7 @@ enum columnId {
   maxPods = "max-pods",
   replicas = "replicas",
   age = "age",
-  status = "status"
+  status = "status",
 }
 
 interface Props extends RouteComponentProps<HpaRouteParams> {
@@ -50,11 +50,14 @@ interface Props extends RouteComponentProps<HpaRouteParams> {
 export class HorizontalPodAutoscalers extends React.Component<Props> {
   getTargets(hpa: HorizontalPodAutoscaler) {
     const metrics = hpa.getMetrics();
-    const metricsRemainCount = metrics.length - 1;
-    const metricsRemain = metrics.length > 1 ? <>{metricsRemainCount} more...</> : null;
-    const metricValues = hpa.getMetricValues(metrics[0]);
 
-    return <p>{metricValues} {metricsRemain && "+"}{metricsRemain}</p>;
+    if (metrics.length === 0) {
+      return <p>--</p>;
+    }
+
+    const metricsRemain = metrics.length > 1 ? `+${metrics.length - 1} more...` : "";
+
+    return <p>{hpa.getMetricValues(metrics[0])} {metricsRemain}</p>;
   }
 
   render() {
@@ -72,7 +75,7 @@ export class HorizontalPodAutoscalers extends React.Component<Props> {
           [columnId.age]: item => item.getTimeDiffFromNow(),
         }}
         searchFilters={[
-          item => item.getSearchFields()
+          item => item.getSearchFields(),
         ]}
         renderHeaderTitle="Horizontal Pod Autoscalers"
         renderTableHeader={[
@@ -84,7 +87,7 @@ export class HorizontalPodAutoscalers extends React.Component<Props> {
           { title: "Max Pods", className: "max-pods", sortBy: columnId.maxPods, id: columnId.maxPods },
           { title: "Replicas", className: "replicas", sortBy: columnId.replicas, id: columnId.replicas },
           { title: "Age", className: "age", sortBy: columnId.age, id: columnId.age },
-          { title: "Status", className: "status", id: columnId.status },
+          { title: "Status", className: "status scrollable", id: columnId.status },
         ]}
         renderTableContents={hpa => [
           hpa.getName(),
@@ -105,9 +108,10 @@ export class HorizontalPodAutoscalers extends React.Component<Props> {
                 tooltip={tooltip}
                 className={cssNames(type.toLowerCase())}
                 expandable={false}
+                scrollable={true}
               />
             );
-          })
+          }),
         ]}
       />
     );

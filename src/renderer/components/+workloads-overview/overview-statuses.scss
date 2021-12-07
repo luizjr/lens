@@ -23,16 +23,7 @@
   position: relative;
   width: 100%;
   min-width: $unit * 75;
-  background: $contentColor;
-
-  > .header {
-    position: relative;
-    padding: $padding * 2;
-
-    h5 {
-      color: $textColorPrimary;
-    }
-  }
+  background: var(--contentColor);
 
   .workloads {
     display: grid;
@@ -49,7 +40,7 @@
         text-align: center;
 
         a {
-          color: $colorInfo;
+          color: var(--colorInfo);
         }
       }
     }

@@ -40,7 +40,7 @@ const dummyReplicaSet: ReplicaSet = {
   spec: {
     replicas: 1,
     selector: {
-      matchLabels: { "label": "label" }
+      matchLabels: { "label": "label" },
     },
     template: {
       metadata: {
@@ -107,6 +107,7 @@ const dummyReplicaSet: ReplicaSet = {
   toPlainObject: jest.fn(),
   update: jest.fn(),
   delete: jest.fn(),
+  patch: jest.fn(),
 };
 
 describe("<ReplicaSetScaleDialog />", () => {
@@ -114,7 +115,7 @@ describe("<ReplicaSetScaleDialog />", () => {
 
   beforeEach(() => {
     replicaSetApi = new ReplicaSetApi({
-      objectConstructor: ReplicaSet
+      objectConstructor: ReplicaSet,
     });
   });
 

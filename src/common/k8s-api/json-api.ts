@@ -21,14 +21,15 @@
 
 // Base http-service / json-api class
 
+import { Agent as HttpAgent } from "http";
+import { Agent as HttpsAgent } from "https";
 import { merge } from "lodash";
 import fetch, { Response, RequestInit } from "node-fetch";
 import { stringify } from "querystring";
 import { EventEmitter } from "../../common/event-emitter";
 import logger from "../../common/logger";
 
-export interface JsonApiData {
-}
+export interface JsonApiData {}
 
 export interface JsonApiError {
   code?: number;
@@ -53,38 +54,55 @@ export interface JsonApiConfig {
   apiBase: string;
   serverAddress: string;
   debug?: boolean;
+  getRequestOptions?: () => Promise<RequestInit>;
 }
+
+const httpAgent = new HttpAgent({ keepAlive: true });
+const httpsAgent = new HttpsAgent({ keepAlive: true });
+
 export class JsonApi<D = JsonApiData, P extends JsonApiParams = JsonApiParams> {
   static reqInitDefault: RequestInit = {
     headers: {
-      "content-type": "application/json"
-    }
+      "content-type": "application/json",
+    },
   };
 
   static configDefault: Partial<JsonApiConfig> = {
-    debug: false
+    debug: false,
   };
 
   constructor(public readonly config: JsonApiConfig, protected reqInit?: RequestInit) {
     this.config = Object.assign({}, JsonApi.configDefault, config);
     this.reqInit = merge({}, JsonApi.reqInitDefault, reqInit);
     this.parseResponse = this.parseResponse.bind(this);
+    this.getRequestOptions = config.getRequestOptions ?? (() => Promise.resolve({}));
   }
 
   public onData = new EventEmitter<[D, Response]>();
   public onError = new EventEmitter<[JsonApiErrorParsed, Response]>();
+  
+  private getRequestOptions: JsonApiConfig["getRequestOptions"];
 
   get<T = D>(path: string, params?: P, reqInit: RequestInit = {}) {
     return this.request<T>(path, params, { ...reqInit, method: "get" });
   }
 
-  getResponse(path: string, params?: P, init: RequestInit = {}): Promise<Response> {
+  async getResponse(path: string, params?: P, init: RequestInit = {}): Promise<Response> {
     let reqUrl = `${this.config.serverAddress}${this.config.apiBase}${path}`;
-    const reqInit: RequestInit = merge({}, this.reqInit, init);
+    const reqInit: RequestInit = merge(
+      {},
+      this.reqInit,
+      await this.getRequestOptions(),
+      init,
+    );
     const { query } = params || {} as P;
 
     if (!reqInit.method) {
       reqInit.method = "get";
+    }
+
+    if (!reqInit.agent) {
+      reqInit.agent = reqUrl.startsWith("https:") ? httpsAgent : httpAgent;
     }
 
     if (query) {
@@ -114,7 +132,12 @@ export class JsonApi<D = JsonApiData, P extends JsonApiParams = JsonApiParams> {
 
   protected async request<D>(path: string, params?: P, init: RequestInit = {}) {
     let reqUrl = `${this.config.serverAddress}${this.config.apiBase}${path}`;
-    const reqInit: RequestInit = merge({}, this.reqInit, init);
+    const reqInit: RequestInit = merge(
+      {},
+      this.reqInit,
+      await this.getRequestOptions(),
+      init,
+    );
     const { data, query } = params || {} as P;
 
     if (data && !reqInit.body) {
@@ -188,7 +211,7 @@ export class JsonApi<D = JsonApiData, P extends JsonApiParams = JsonApiParams> {
   protected writeLog(log: JsonApiLog) {
     const { method, reqUrl, ...params } = log;
 
-    logger.info(`[JSON-API] request ${method} ${reqUrl}`, params);
+    logger.debug(`[JSON-API] request ${method} ${reqUrl}`, params);
   }
 }
 

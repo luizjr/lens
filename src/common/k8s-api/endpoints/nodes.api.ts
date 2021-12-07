@@ -20,7 +20,7 @@
  */
 
 import { KubeObject } from "../kube-object";
-import { autoBind, cpuUnitsToNumber, unitsToBytes } from "../../../renderer/utils";
+import { autoBind, cpuUnitsToNumber, iter, unitsToBytes } from "../../../renderer/utils";
 import { IMetrics, metricsApi } from "./metrics.api";
 import { KubeApi } from "../kube-api";
 import type { KubeJsonApiData } from "../kube-json-api";
@@ -30,7 +30,7 @@ export class NodesApi extends KubeApi<Node> {
 }
 
 export function getMetricsForAllNodes(): Promise<INodeMetrics> {
-  const opts = { category: "nodes"};
+  const opts = { category: "nodes" };
 
   return metricsApi.getMetrics({
     memoryUsage: opts,
@@ -40,7 +40,7 @@ export function getMetricsForAllNodes(): Promise<INodeMetrics> {
     cpuUsage: opts,
     cpuCapacity: opts,
     fsSize: opts,
-    fsUsage: opts
+    fsUsage: opts,
   });
 }
 
@@ -56,6 +56,30 @@ export interface INodeMetrics<T = IMetrics> {
   fsSize: T;
 }
 
+export interface NodeTaint {
+  key: string;
+  value?: string;
+  effect: string;
+  timeAdded: string;
+}
+
+export function formatNodeTaint(taint: NodeTaint): string {
+  if (taint.value) {
+    return `${taint.key}=${taint.value}:${taint.effect}`;
+  }
+
+  return `${taint.key}:${taint.effect}`;
+}
+
+export interface NodeCondition {
+  type: string;
+  status: string;
+  lastHeartbeatTime?: string;
+  lastTransitionTime?: string;
+  reason?: string;
+  message?: string;
+}
+
 export interface Node {
   spec: {
     podCIDR?: string;
@@ -65,39 +89,27 @@ export interface Node {
      * @deprecated see https://issues.k8s.io/61966
      */
     externalID?: string;
-    taints?: {
-      key: string;
-      value: string;
-      effect: string;
-      timeAdded: string;
-    }[];
+    taints?: NodeTaint[];
     unschedulable?: boolean;
   };
   status: {
     capacity?: {
       cpu: string;
-      ["ephemeral-storage"]: string;
-      ["hugepages-1Gi"]: string;
-      ["hugepages-2Mi"]: string;
+      "ephemeral-storage": string;
+      "hugepages-1Gi": string;
+      "hugepages-2Mi": string;
       memory: string;
       pods: string;
     };
     allocatable?: {
       cpu: string;
-      ["ephemeral-storage"]: string;
-      ["hugepages-1Gi"]: string;
-      ["hugepages-2Mi"]: string;
+      "ephemeral-storage": string;
+      "hugepages-1Gi": string;
+      "hugepages-2Mi": string;
       memory: string;
       pods: string;
     };
-    conditions?: {
-      type: string;
-      status: string;
-      lastHeartbeatTime?: string;
-      lastTransitionTime?: string;
-      reason?: string;
-      message?: string;
-    }[];
+    conditions?: NodeCondition[];
     addresses?: {
       type: string;
       address: string;
@@ -131,6 +143,19 @@ export interface Node {
   };
 }
 
+/**
+ * Iterate over `conditions` yielding the `type` field if the `status` field is
+ * the string `"True"`
+ * @param conditions An iterator of some conditions
+ */
+function* getTrueConditionTypes(conditions: IterableIterator<NodeCondition> | Iterable<NodeCondition>): IterableIterator<string> {
+  for (const { status, type } of conditions) {
+    if (status === "True") {
+      yield type;
+    }
+  }
+}
+
 export class Node extends KubeObject {
   static kind = "Node";
   static namespaced = false;
@@ -141,16 +166,15 @@ export class Node extends KubeObject {
     autoBind(this);
   }
 
-  getNodeConditionText() {
-    const { conditions } = this.status;
-
-    if (!conditions) return "";
-
-    return conditions.reduce((types, current) => {
-      if (current.status !== "True") return "";
-
-      return types += ` ${current.type}`;
-    }, "");
+  /**
+   * Returns the concatination of all current condition types which have a status
+   * of `"True"`
+   */
+  getNodeConditionText(): string {
+    return iter.join(
+      getTrueConditionTypes(this.status?.conditions ?? []),
+      " ",
+    );
   }
 
   getTaints() {
@@ -212,13 +236,10 @@ export class Node extends KubeObject {
   }
 
   getOperatingSystem(): string {
-    const label = this.getLabels().find(label => label.startsWith("kubernetes.io/os="));
-
-    if (label) {
-      return label.split("=", 2)[1];
-    }
-
-    return "linux";
+    return this.metadata?.labels?.["kubernetes.io/os"]
+      || this.metadata?.labels?.["beta.kubernetes.io/os"]
+      || this.status?.nodeInfo?.operatingSystem
+      || "linux";
   }
 
   isUnschedulable() {
@@ -235,5 +256,5 @@ if (isClusterPageContext()) {
 }
 
 export {
-  nodesApi
+  nodesApi,
 };

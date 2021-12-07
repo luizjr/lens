@@ -19,14 +19,14 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import "./cluster-metrics.scss";
+import styles from "./cluster-metrics.module.css";
 
 import React from "react";
 import { observer } from "mobx-react";
 import type { ChartOptions, ChartPoint } from "chart.js";
 import { clusterOverviewStore, MetricType } from "./cluster-overview.store";
 import { BarChart } from "../chart";
-import { bytesToUnits } from "../../utils";
+import { bytesToUnits, cssNames } from "../../utils";
 import { Spinner } from "../spinner";
 import { ZebraStripes } from "../chart/zebra-stripes.plugin";
 import { ClusterNoMetrics } from "./cluster-no-metrics";
@@ -40,23 +40,23 @@ export const ClusterMetrics = observer(() => {
   const colors = { cpu: "#3D90CE", memory: "#C93DCE" };
   const data = metricValues.map(value => ({
     x: value[0],
-    y: parseFloat(value[1]).toFixed(3)
+    y: parseFloat(value[1]).toFixed(3),
   }));
 
   const datasets = [{
     id: metricType + metricNodeRole,
     label: `${metricType.toUpperCase()} usage`,
     borderColor: colors[metricType],
-    data
+    data,
   }];
   const cpuOptions: ChartOptions = {
     scales: {
       yAxes: [{
         ticks: {
           suggestedMax: cpuCapacity,
-          callback: (value) => value
-        }
-      }]
+          callback: (value) => value,
+        },
+      }],
     },
     tooltips: {
       callbacks: {
@@ -64,18 +64,18 @@ export const ClusterMetrics = observer(() => {
           const value = data.datasets[0].data[index] as ChartPoint;
 
           return value.y.toString();
-        }
-      }
-    }
+        },
+      },
+    },
   };
   const memoryOptions: ChartOptions = {
     scales: {
       yAxes: [{
         ticks: {
           suggestedMax: memoryCapacity,
-          callback: (value: string) => !value ? 0 : bytesToUnits(parseInt(value))
-        }
-      }]
+          callback: (value: string) => !value ? 0 : bytesToUnits(parseInt(value)),
+        },
+      }],
     },
     tooltips: {
       callbacks: {
@@ -83,9 +83,9 @@ export const ClusterMetrics = observer(() => {
           const value = data.datasets[0].data[index] as ChartPoint;
 
           return bytesToUnits(parseInt(value.y as string), 3);
-        }
-      }
-    }
+        },
+      },
+    },
   };
   const options = metricType === MetricType.CPU ? cpuOptions : memoryOptions;
 
@@ -95,7 +95,7 @@ export const ClusterMetrics = observer(() => {
     }
 
     if (!memoryCapacity || !cpuCapacity) {
-      return <ClusterNoMetrics className="empty"/>;
+      return <ClusterNoMetrics className={styles.empty}/>;
     }
 
     return (
@@ -106,12 +106,13 @@ export const ClusterMetrics = observer(() => {
         timeLabelStep={5}
         showLegend={false}
         plugins={[ZebraStripes]}
+        className={styles.chart}
       />
     );
   };
 
   return (
-    <div className="ClusterMetrics flex column">
+    <div className={cssNames(styles.ClusterMetrics, "flex column")}>
       <ClusterMetricSwitchers/>
       {renderMetrics()}
     </div>

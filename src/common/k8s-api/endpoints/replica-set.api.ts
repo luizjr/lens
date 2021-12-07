@@ -27,6 +27,7 @@ import { metricsApi } from "./metrics.api";
 import type { IPodContainer, IPodMetrics, Pod } from "./pods.api";
 import type { KubeJsonApiData } from "../kube-json-api";
 import { isClusterPageContext } from "../../utils/cluster-id-url-parsing";
+import type { LabelSelector } from "../kube-object";
 
 export class ReplicaSetApi extends KubeApi<ReplicaSet> {
   protected getScaleApiUrl(params: { namespace: string; name: string }) {
@@ -44,9 +45,9 @@ export class ReplicaSetApi extends KubeApi<ReplicaSet> {
       data: {
         metadata: params,
         spec: {
-          replicas
-        }
-      }
+          replicas,
+        },
+      },
     });
   }
 }
@@ -59,6 +60,8 @@ export function getMetricsForReplicaSets(replicasets: ReplicaSet[], namespace: s
     cpuUsage: opts,
     memoryUsage: opts,
     fsUsage: opts,
+    fsWrites: opts,
+    fsReads: opts,
     networkReceive: opts,
     networkTransmit: opts,
   }, {
@@ -78,7 +81,7 @@ export class ReplicaSet extends WorkloadKubeObject {
 
   declare spec: {
     replicas?: number;
-    selector: { matchLabels: { [app: string]: string } };
+    selector: LabelSelector;
     template?: {
       metadata: {
         labels: {
@@ -133,5 +136,5 @@ if (isClusterPageContext()) {
 }
 
 export {
-  replicaSetApi
+  replicaSetApi,
 };

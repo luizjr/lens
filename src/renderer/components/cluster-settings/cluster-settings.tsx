@@ -79,7 +79,7 @@ export function TerminalSettings({ entity }: EntitySettingViewProps) {
 
   return (
     <section>
-      <components.ClusterHomeDirSetting cluster={cluster} />
+      <components.ClusterLocalTerminalSetting cluster={cluster} />
     </section>
   );
 }
@@ -119,7 +119,7 @@ export function MetricsSettings({ entity }: EntitySettingViewProps) {
   );
 }
 
-export function NodeShellSettings({entity}: EntitySettingViewProps) {
+export function NodeShellSettings({ entity }: EntitySettingViewProps) {
   const cluster = getClusterForEntity(entity);
 
   if(!cluster) {

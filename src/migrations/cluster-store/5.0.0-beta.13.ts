@@ -23,8 +23,8 @@ import type { ClusterModel, ClusterPreferences, ClusterPrometheusPreferences } f
 import { MigrationDeclaration, migrationLog } from "../helpers";
 import { generateNewIdFor } from "../utils";
 import path from "path";
-import { app } from "electron";
 import { moveSync, removeSync } from "fs-extra";
+import { AppPaths } from "../../common/app-paths";
 
 function mergePrometheusPreferences(left: ClusterPrometheusPreferences, right: ClusterPrometheusPreferences): ClusterPrometheusPreferences {
   if (left.prometheus && left.prometheusProvider) {
@@ -59,7 +59,7 @@ function mergePreferences(left: ClusterPreferences, right: ClusterPreferences): 
 function mergeLabels(left: Record<string, string>, right: Record<string, string>): Record<string, string> {
   return {
     ...right,
-    ...left
+    ...left,
   };
 }
 
@@ -106,7 +106,7 @@ function moveStorageFolder({ folder, newId, oldId }: { folder: string, newId: st
 export default {
   version: "5.0.0-beta.13",
   run(store) {
-    const folder = path.resolve(app.getPath("userData"), "lens-local-storage");
+    const folder = path.resolve(AppPaths.get("userData"), "lens-local-storage");
 
     const oldClusters: ClusterModel[] = store.get("clusters") ?? [];
     const clusters = new Map<string, ClusterModel>();
@@ -129,5 +129,5 @@ export default {
     }
 
     store.set("clusters", [...clusters.values()]);
-  }
+  },
 } as MigrationDeclaration;

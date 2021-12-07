@@ -19,15 +19,11 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import "./pod-details-affinities.scss";
 import React from "react";
-import jsYaml from "js-yaml";
-import { DrawerParamToggler, DrawerItem } from "../drawer";
-import type { Pod, Deployment, DaemonSet, StatefulSet, ReplicaSet, Job } from "../../../common/k8s-api/endpoints";
-import MonacoEditor from "react-monaco-editor";
-import { cssNames } from "../../utils";
-import { ThemeStore } from "../../theme.store";
-import { UserStore } from "../../../common/user-store";
+import yaml from "js-yaml";
+import { DrawerItem, DrawerParamToggler } from "../drawer";
+import type { DaemonSet, Deployment, Job, Pod, ReplicaSet, StatefulSet } from "../../../common/k8s-api/endpoints";
+import { MonacoEditor } from "../monaco-editor";
 
 interface Props {
   workload: Pod | Deployment | DaemonSet | StatefulSet | ReplicaSet | Job;
@@ -44,15 +40,11 @@ export class PodDetailsAffinities extends React.Component<Props> {
     return (
       <DrawerItem name="Affinities" className="PodDetailsAffinities">
         <DrawerParamToggler label={affinitiesNum}>
-          <div className="ace-container">
-            <MonacoEditor
-              options={{readOnly: true, ...UserStore.getInstance().getEditorOptions()}}
-              className={cssNames("MonacoEditor")}
-              theme={ThemeStore.getInstance().activeTheme.monacoTheme}
-              language="yaml"
-              value={jsYaml.dump(affinities)}
-            />
-          </div>
+          <MonacoEditor
+            readOnly
+            style={{ height: 200 }}
+            value={yaml.dump(affinities)}
+          />
         </DrawerParamToggler>
       </DrawerItem>
     );

@@ -23,28 +23,28 @@ import moment from "moment-timezone";
 import path from "path";
 import os from "os";
 import { ThemeStore } from "../../renderer/theme.store";
-import { ObservableToggleSet } from "../utils";
-import type {monaco} from "react-monaco-editor";
+import { getAppVersion, ObservableToggleSet } from "../utils";
+import type { editor } from "monaco-editor";
 import merge from "lodash/merge";
+import { SemVer } from "semver";
 
 export interface KubeconfigSyncEntry extends KubeconfigSyncValue {
   filePath: string;
 }
 
-export interface KubeconfigSyncValue { }
-
-export interface EditorConfiguration {
-  miniMap?: monaco.editor.IEditorMinimapOptions;
-  lineNumbers?: monaco.editor.LineNumbersType;
-  tabSize?: number;
+export interface KubeconfigSyncValue {
 }
 
+export type EditorConfiguration = Pick<editor.IStandaloneEditorConstructionOptions,
+  "minimap" | "tabSize" | "lineNumbers">;
+
 export const defaultEditorConfig: EditorConfiguration = {
+  tabSize: 2,
   lineNumbers: "on",
-  miniMap: {
-    enabled: true
+  minimap: {
+    enabled: true,
+    side: "right",
   },
-  tabSize: 2
 };
 
 interface PreferenceDescription<T, R = T> {
@@ -135,12 +135,32 @@ const allowErrorReporting: PreferenceDescription<boolean> = {
   },
 };
 
+export interface DownloadMirror {
+  url: string;
+  label: string;
+  platforms: Set<NodeJS.Platform>;
+}
+
+export const defaultPackageMirror = "default";
+export const packageMirrors = new Map<string, DownloadMirror>([
+  [defaultPackageMirror, {
+    url: "https://storage.googleapis.com/kubernetes-release/release",
+    label: "Default (Google)",
+    platforms: new Set(["darwin", "win32", "linux"]),
+  }],
+  ["china", {
+    url: "https://mirror.azure.cn/kubernetes/kubectl",
+    label: "China (Azure)",
+    platforms: new Set(["win32", "linux"]),
+  }],
+]);
+
 const downloadMirror: PreferenceDescription<string> = {
   fromStore(val) {
-    return val ?? "default";
+    return packageMirrors.has(val) ? val : defaultPackageMirror;
   },
   toStore(val) {
-    if (!val || val === "default") {
+    if (!val || val === defaultPackageMirror) {
       return undefined;
     }
 
@@ -216,7 +236,7 @@ const terminalCopyOnSelect: PreferenceDescription<boolean> = {
 const hiddenTableColumns: PreferenceDescription<[string, string[]][], Map<string, ObservableToggleSet<string>>> = {
   fromStore(val) {
     return new Map(
-      (val ?? []).map(([tableId, columnIds]) => [tableId, new ObservableToggleSet(columnIds)])
+      (val ?? []).map(([tableId, columnIds]) => [tableId, new ObservableToggleSet(columnIds)]),
     );
   },
   toStore(val) {
@@ -239,7 +259,7 @@ const syncKubeconfigEntries: PreferenceDescription<KubeconfigSyncEntry[], Map<st
     return new Map(
       val
         ?.map(({ filePath, ...rest }) => [filePath, rest])
-      ?? [[mainKubeFolder, {}]]
+      ?? [[mainKubeFolder, {}]],
     );
   },
   toStore(val) {
@@ -256,6 +276,32 @@ const editorConfiguration: PreferenceDescription<EditorConfiguration, EditorConf
     return merge(defaultEditorConfig, val);
   },
   toStore(val) {
+    return val;
+  },
+};
+
+const updateChannels = new Map([
+  ["latest", {
+    label: "Stable",
+  }],
+  ["beta", {
+    label: "Beta",
+  }],
+  ["alpha", {
+    label: "Alpha",
+  }],
+]);
+const defaultUpdateChannel = new SemVer(getAppVersion()).prerelease[0]?.toString() || "latest";
+
+const updateChannel: PreferenceDescription<string> = {
+  fromStore(val) {
+    return updateChannels.has(val) ? val : defaultUpdateChannel;
+  },
+  toStore(val) {
+    if (!updateChannels.has(val) || val === defaultUpdateChannel) {
+      return undefined;
+    }
+
     return val;
   },
 };
@@ -288,4 +334,9 @@ export const DESCRIPTORS = {
   syncKubeconfigEntries,
   editorConfiguration,
   terminalCopyOnSelect,
+  updateChannel,
+};
+
+export const CONSTANTS = {
+  updateChannels,
 };

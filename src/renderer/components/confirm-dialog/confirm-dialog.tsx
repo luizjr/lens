@@ -97,7 +97,7 @@ export class ConfirmDialog extends React.Component<ConfirmDialogProps> {
         <>
           <p>Confirmation action failed:</p>
           <p>{error?.message ?? error?.toString?.() ?? "Unknown error"}</p>
-        </>
+        </>,
       );
     } finally {
       this.isSaving = false;
@@ -117,7 +117,7 @@ export class ConfirmDialog extends React.Component<ConfirmDialogProps> {
         <>
           <p>Cancelling action failed:</p>
           <p>{error?.message ?? error?.toString?.() ?? "Unknown error"}</p>
-        </>
+        </>,
       );
     } finally {
       this.isSaving = false;
@@ -140,6 +140,7 @@ export class ConfirmDialog extends React.Component<ConfirmDialogProps> {
         isOpen={dialogState.isOpen}
         onClose={this.onClose}
         close={this.close}
+        {...(dialogState.isOpen ? { "data-testid":"confirmation-dialog" } : {})}
       >
         <div className="confirm-content">
           {icon} {message}
@@ -158,6 +159,7 @@ export class ConfirmDialog extends React.Component<ConfirmDialogProps> {
             label={labelOk}
             onClick={prevDefault(this.ok)}
             waiting={this.isSaving}
+            data-testid="confirm"
             {...okButtonProps}
           />
         </div>

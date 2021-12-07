@@ -26,12 +26,14 @@ import { disposeOnUnmount, observer } from "mobx-react";
 import { DrawerItem, DrawerTitle } from "../drawer";
 import { Badge } from "../badge";
 import type { KubeObjectDetailsProps } from "../kube-object-details";
-import type { Service } from "../../../common/k8s-api/endpoints";
+import { Service } from "../../../common/k8s-api/endpoints";
 import { KubeObjectMeta } from "../kube-object-meta";
 import { ServicePortComponent } from "./service-port-component";
 import { endpointStore } from "../+network-endpoints/endpoints.store";
 import { ServiceDetailsEndpoint } from "./service-details-endpoint";
 import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
+import { portForwardStore } from "../../port-forward";
+import logger from "../../../common/logger";
 
 interface Props extends KubeObjectDetailsProps<Service> {
 }
@@ -42,19 +44,35 @@ export class ServiceDetails extends React.Component<Props> {
     const { object: service } = this.props;
 
     disposeOnUnmount(this, [
-      kubeWatchApi.subscribeStores([endpointStore], {
-        preload: true,
+      kubeWatchApi.subscribeStores([
+        endpointStore,
+      ], {
         namespaces: [service.getNs()],
       }),
+      portForwardStore.watch(),
     ]);
   }
 
   render() {
     const { object: service } = this.props;
 
-    if (!service) return null;
+    if (!service) {
+      return null;
+    }
+
+    if (!(service instanceof Service)) {
+      logger.error("[ServiceDetails]: passed object that is not an instanceof Service", service);
+
+      return null;
+    }
+
     const { spec } = service;
     const endpoint = endpointStore.getByName(service.getName(), service.getNs());
+    const externalIps = service.getExternalIps();
+
+    if (externalIps.length === 0 && spec?.externalName) {
+      externalIps.push(spec.externalName);
+    }
 
     return (
       <div className="ServicesDetails">
@@ -94,9 +112,9 @@ export class ServiceDetails extends React.Component<Props> {
           {service.getIpFamilyPolicy()}
         </DrawerItem>
 
-        {service.getExternalIps().length > 0 && (
+        {externalIps.length > 0 && (
           <DrawerItem name="External IPs">
-            {service.getExternalIps().map(ip => <div key={ip}>{ip}</div>)}
+            {externalIps.map(ip => <div key={ip}>{ip}</div>)}
           </DrawerItem>
         )}
 

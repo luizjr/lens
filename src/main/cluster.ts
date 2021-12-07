@@ -32,9 +32,10 @@ import logger from "./logger";
 import { VersionDetector } from "./cluster-detectors/version-detector";
 import { DetectorRegistry } from "./cluster-detectors/detector-registry";
 import plimit from "p-limit";
-import type { ClusterState, ClusterRefreshOptions, ClusterMetricsResourceType, ClusterId, ClusterMetadata, ClusterModel, ClusterPreferences, ClusterPrometheusPreferences, UpdateClusterModel } from "../common/cluster-types";
+import type { ClusterState, ClusterRefreshOptions, ClusterMetricsResourceType, ClusterId, ClusterMetadata, ClusterModel, ClusterPreferences, ClusterPrometheusPreferences, UpdateClusterModel, KubeAuthUpdate } from "../common/cluster-types";
 import { ClusterMetadataKey, initialNodeShellImage, ClusterStatus } from "../common/cluster-types";
-import { storedKubeConfigFolder, toJS } from "../common/utils";
+import { disposer, storedKubeConfigFolder, toJS } from "../common/utils";
+import type { Response } from "request";
 
 /**
  * Cluster
@@ -51,8 +52,8 @@ export class Cluster implements ClusterModel, ClusterState {
    * @internal
    */
   public contextHandler: ContextHandler;
-  protected kubeconfigManager: KubeconfigManager;
-  protected eventDisposers: Function[] = [];
+  protected proxyKubeconfigManager: KubeconfigManager;
+  protected eventsDisposer = disposer();
   protected activated = false;
   private resourceAccessStatuses: Map<KubeApiResource, boolean> = new Map();
 
@@ -116,12 +117,6 @@ export class Cluster implements ClusterModel, ClusterState {
    * @observable
    */
   @observable disconnected = true;
-  /**
-   * Connection failure reason
-   *
-   * @observable
-   */
-  @observable failureReason: string;
   /**
    * Does user have admin like access
    *
@@ -223,9 +218,7 @@ export class Cluster implements ClusterModel, ClusterState {
    * @internal
    */
   @computed get defaultNamespace(): string {
-    const { defaultNamespace } = this.preferences;
-
-    return defaultNamespace;
+    return this.preferences.defaultNamespace;
   }
 
   constructor(model: ClusterModel) {
@@ -245,12 +238,12 @@ export class Cluster implements ClusterModel, ClusterState {
     if (ipcMain) {
       // for the time being, until renderer gets its own cluster type
       this.contextHandler = new ContextHandler(this);
-      this.kubeconfigManager = new KubeconfigManager(this, this.contextHandler);
+      this.proxyKubeconfigManager = new KubeconfigManager(this, this.contextHandler);
 
       logger.debug(`[CLUSTER]: Cluster init success`, {
         id: this.id,
         context: this.contextName,
-        apiUrl: this.apiUrl
+        apiUrl: this.apiUrl,
       });
     }
   }
@@ -302,40 +295,31 @@ export class Cluster implements ClusterModel, ClusterState {
     const refreshTimer = setInterval(() => !this.disconnected && this.refresh(), 30000); // every 30s
     const refreshMetadataTimer = setInterval(() => !this.disconnected && this.refreshMetadata(), 900000); // every 15 minutes
 
-    if (ipcMain) {
-      this.eventDisposers.push(
-        reaction(() => this.getState(), () => this.pushState()),
-        reaction(() => this.prometheusPreferences, (prefs) => this.contextHandler.setupPrometheus(prefs), { equals: comparer.structural, }),
-        () => {
-          clearInterval(refreshTimer);
-          clearInterval(refreshMetadataTimer);
-        },
-        reaction(() => this.defaultNamespace, () => this.recreateProxyKubeconfig()),
-      );
-    }
+    this.eventsDisposer.push(
+      reaction(() => this.getState(), state => this.pushState(state)),
+      reaction(
+        () => this.prometheusPreferences,
+        prefs => this.contextHandler.setupPrometheus(prefs),
+        { equals: comparer.structural },
+      ),
+      () => clearInterval(refreshTimer),
+      () => clearInterval(refreshMetadataTimer),
+      reaction(() => this.defaultNamespace, () => this.recreateProxyKubeconfig()),
+    );
   }
 
   /**
    * @internal
    */
-  async recreateProxyKubeconfig() {
-    logger.info("Recreate proxy kubeconfig");
+  protected async recreateProxyKubeconfig() {
+    logger.info("[CLUSTER]: Recreating proxy kubeconfig");
 
     try {
-      this.kubeconfigManager.clear();
-    } catch {
-      // do nothing
+      await this.proxyKubeconfigManager.clear();
+      await this.getProxyKubeconfig();
+    } catch (error) {
+      logger.error(`[CLUSTER]: failed to recreate proxy kubeconfig`, error);
     }
-    this.getProxyKubeconfig();
-  }
-
-  /**
-   * internal
-   */
-  protected unbindEvents() {
-    logger.info(`[CLUSTER]: unbind events`, this.getMeta());
-    this.eventDisposers.forEach(dispose => dispose());
-    this.eventDisposers.length = 0;
   }
 
   /**
@@ -350,21 +334,27 @@ export class Cluster implements ClusterModel, ClusterState {
 
     logger.info(`[CLUSTER]: activate`, this.getMeta());
 
-    if (!this.eventDisposers.length) {
+    if (!this.eventsDisposer.length) {
       this.bindEvents();
     }
 
     if (this.disconnected || !this.accessible) {
       await this.reconnect();
     }
+
+    this.broadcastConnectUpdate("Refreshing connection status ...");
     await this.refreshConnectionStatus();
 
     if (this.accessible) {
+      this.broadcastConnectUpdate("Refreshing cluster accessibility ...");
       await this.refreshAccessibility();
-      this.ensureKubectl(); // download kubectl in background, so it's not blocking dashboard
+      // download kubectl in background, so it's not blocking dashboard
+      this.ensureKubectl()
+        .catch(error => logger.warn(`[CLUSTER]: failed to download kubectl for clusterId=${this.id}`, error));
+      this.broadcastConnectUpdate("Connected, waiting for view to load ...");
     }
-    this.activated = true;
 
+    this.activated = true;
     this.pushState();
   }
 
@@ -394,8 +384,8 @@ export class Cluster implements ClusterModel, ClusterState {
    * @internal
    */
   @action disconnect() {
-    logger.info(`[CLUSTER]: disconnect`, this.getMeta());
-    this.unbindEvents();
+    logger.info(`[CLUSTER]: disconnecting`, { id: this.id });
+    this.eventsDisposer();
     this.contextHandler?.stopServer();
     this.disconnected = true;
     this.online = false;
@@ -405,6 +395,7 @@ export class Cluster implements ClusterModel, ClusterState {
     this.allowedNamespaces = [];
     this.resourceAccessStatuses.clear();
     this.pushState();
+    logger.info(`[CLUSTER]: disconnected`, { id: this.id });
   }
 
   /**
@@ -444,9 +435,8 @@ export class Cluster implements ClusterModel, ClusterState {
   private async refreshAccessibility(): Promise<void> {
     this.isAdmin = await this.isClusterAdmin();
     this.isGlobalWatchEnabled = await this.canUseWatchApi({ resource: "*" });
-
-    await this.refreshAllowedResources();
-
+    this.allowedNamespaces = await this.getAllowedNamespaces();
+    this.allowedResources = await this.getAllowedResources();
     this.ready = true;
   }
 
@@ -459,15 +449,6 @@ export class Cluster implements ClusterModel, ClusterState {
 
     this.online = connectionStatus > ClusterStatus.Offline;
     this.accessible = connectionStatus == ClusterStatus.AccessGranted;
-  }
-
-  /**
-   * @internal
-   */
-  @action
-  async refreshAllowedResources() {
-    this.allowedNamespaces = await this.getAllowedNamespaces();
-    this.allowedResources = await this.getAllowedResources();
   }
 
   async getKubeconfig(): Promise<KubeConfig> {
@@ -490,7 +471,7 @@ export class Cluster implements ClusterModel, ClusterState {
    * @internal
    */
   async getProxyKubeconfigPath(): Promise<string> {
-    return this.kubeconfigManager.getPath();
+    return this.proxyKubeconfigManager.getPath();
   }
 
   protected async getConnectionStatus(): Promise<ClusterStatus> {
@@ -500,34 +481,35 @@ export class Cluster implements ClusterModel, ClusterState {
 
       this.metadata.version = versionData.value;
 
-      this.failureReason = null;
-
       return ClusterStatus.AccessGranted;
     } catch (error) {
-      logger.error(`Failed to connect cluster "${this.contextName}": ${error}`);
+      logger.error(`[CLUSTER]: Failed to connect to "${this.contextName}": ${error}`);
 
       if (error.statusCode) {
         if (error.statusCode >= 400 && error.statusCode < 500) {
-          this.failureReason = "Invalid credentials";
-
-          return ClusterStatus.AccessDenied;
-        } else {
-          this.failureReason = error.error || error.message;
-
-          return ClusterStatus.Offline;
-        }
-      } else if (error.failed === true) {
-        if (error.timedOut === true) {
-          this.failureReason = "Connection timed out";
-
-          return ClusterStatus.Offline;
-        } else {
-          this.failureReason = "Failed to fetch credentials";
+          this.broadcastConnectUpdate("Invalid credentials", true);
 
           return ClusterStatus.AccessDenied;
         }
+
+        this.broadcastConnectUpdate(error.error || error.message, true);
+
+        return ClusterStatus.Offline;
       }
-      this.failureReason = error.message;
+
+      if (error.failed === true) {
+        if (error.timedOut === true) {
+          this.broadcastConnectUpdate("Connection timed out", true);
+
+          return ClusterStatus.Offline;
+        }
+
+        this.broadcastConnectUpdate("Failed to fetch credentials", true);
+
+        return ClusterStatus.AccessDenied;
+      }
+
+      this.broadcastConnectUpdate(error.message, true);
 
       return ClusterStatus.Offline;
     }
@@ -544,7 +526,7 @@ export class Cluster implements ClusterModel, ClusterState {
       const accessReview = await authApi.createSelfSubjectAccessReview({
         apiVersion: "authorization.k8s.io/v1",
         kind: "SelfSubjectAccessReview",
-        spec: { resourceAttributes }
+        spec: { resourceAttributes },
       });
 
       return accessReview.body.status.allowed;
@@ -578,7 +560,7 @@ export class Cluster implements ClusterModel, ClusterState {
   }
 
   toJSON(): ClusterModel {
-    const model: ClusterModel = {
+    return toJS({
       id: this.id,
       contextName: this.contextName,
       kubeConfigPath: this.kubeConfigPath,
@@ -588,29 +570,24 @@ export class Cluster implements ClusterModel, ClusterState {
       metadata: this.metadata,
       accessibleNamespaces: this.accessibleNamespaces,
       labels: this.labels,
-    };
-
-    return toJS(model);
+    });
   }
 
   /**
    * Serializable cluster-state used for sync btw main <-> renderer
    */
   getState(): ClusterState {
-    const state: ClusterState = {
+    return toJS({
       apiUrl: this.apiUrl,
       online: this.online,
       ready: this.ready,
       disconnected: this.disconnected,
       accessible: this.accessible,
-      failureReason: this.failureReason,
       isAdmin: this.isAdmin,
       allowedNamespaces: this.allowedNamespaces,
       allowedResources: this.allowedResources,
       isGlobalWatchEnabled: this.isGlobalWatchEnabled,
-    };
-
-    return toJS(state);
+    });
   }
 
   /**
@@ -642,7 +619,16 @@ export class Cluster implements ClusterModel, ClusterState {
     };
   }
 
-  protected getAllowedNamespacesErrorCount = 0;
+  /**
+   * broadcast an authentication update concerning this cluster
+   * @internal
+   */
+  broadcastConnectUpdate(message: string, isError = false): void {
+    const update: KubeAuthUpdate = { message, isError };
+
+    logger.debug(`[CLUSTER]: broadcasting connection update`, { ...update, meta: this.getMeta() });
+    broadcastMessage(`cluster:${this.id}:connection-update`, update);
+  }
 
   protected async getAllowedNamespaces() {
     if (this.accessibleNamespaces.length) {
@@ -652,10 +638,8 @@ export class Cluster implements ClusterModel, ClusterState {
     const api = (await this.getProxyKubeconfig()).makeApiClient(CoreV1Api);
 
     try {
-      const { body: { items } } = await api.listNamespace();
+      const { body: { items }} = await api.listNamespace();
       const namespaces = items.map(ns => ns.metadata.name);
-
-      this.getAllowedNamespacesErrorCount = 0; // reset on success
 
       return namespaces;
     } catch (error) {
@@ -663,16 +647,10 @@ export class Cluster implements ClusterModel, ClusterState {
       const namespaceList = [ctx.namespace].filter(Boolean);
 
       if (namespaceList.length === 0 && error instanceof HttpError && error.statusCode === 403) {
-        this.getAllowedNamespacesErrorCount += 1;
+        const { response } = error as HttpError & { response: Response };
 
-        if (this.getAllowedNamespacesErrorCount > 3) {
-          // reset on send
-          this.getAllowedNamespacesErrorCount = 0;
-
-          // then broadcast, make sure it is 3 successive attempts
-          logger.info("[CLUSTER]: listing namespaces is forbidden, broadcasting", { clusterId: this.id, error });
-          broadcastMessage(ClusterListNamespaceForbiddenChannel, this.id);
-        }
+        logger.info("[CLUSTER]: listing namespaces is forbidden, broadcasting", { clusterId: this.id, error: response.body });
+        broadcastMessage(ClusterListNamespaceForbiddenChannel, this.id);
       }
 
       return namespaceList;
@@ -696,7 +674,7 @@ export class Cluster implements ClusterModel, ClusterState {
                 resource: apiResource.apiName,
                 group: apiResource.group,
                 verb: "list",
-                namespace
+                namespace,
               });
 
               this.resourceAccessStatuses.set(apiResource, result);

@@ -22,7 +22,7 @@
 import "./dialog.scss";
 
 import React from "react";
-import { createPortal, findDOMNode } from "react-dom";
+import { createPortal } from "react-dom";
 import { disposeOnUnmount, observer } from "mobx-react";
 import { reaction } from "mobx";
 import { Animate } from "../animate";
@@ -41,6 +41,7 @@ export interface DialogProps {
   modal?: boolean;
   pinned?: boolean;
   animated?: boolean;
+  "data-testid"?: string;
 }
 
 interface DialogState {
@@ -50,6 +51,7 @@ interface DialogState {
 @observer
 export class Dialog extends React.PureComponent<DialogProps, DialogState> {
   private contentElem: HTMLElement;
+  ref = React.createRef<HTMLDivElement>();
 
   static defaultProps: DialogProps = {
     isOpen: false,
@@ -69,9 +71,8 @@ export class Dialog extends React.PureComponent<DialogProps, DialogState> {
     isOpen: this.props.isOpen,
   };
 
-  get elem() {
-    // eslint-disable-next-line react/no-find-dom-node
-    return findDOMNode(this) as HTMLElement;
+  get elem(): HTMLElement {
+    return this.ref.current;
   }
 
   get isOpen() {
@@ -149,12 +150,17 @@ export class Dialog extends React.PureComponent<DialogProps, DialogState> {
   };
 
   render() {
-    const { modal, animated, pinned } = this.props;
+    const { modal, animated, pinned, "data-testid": testId } = this.props;
     let { className } = this.props;
 
     className = cssNames("Dialog flex center", className, { modal, pinned });
     let dialog = (
-      <div className={className} onClick={stopPropagation}>
+      <div
+        className={className}
+        onClick={stopPropagation}
+        ref={this.ref}
+        data-testid={testId}
+      >
         <div className="box" ref={e => this.contentElem = e}>
           {this.props.children}
         </div>

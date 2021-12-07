@@ -19,17 +19,58 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-.iconCell {
-  max-width: 40px;
+.Catalog {
+  :global(.TableHead) .entityName {
+    /* offset for icon to align texts in the column */
+    padding-left: calc(21px + var(--padding) * 2.5);
+  }
+
+  :global(.TableRow):hover .pinIcon {
+    opacity: 1;
+  }
+}
+
+.entityName {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
   display: flex;
   align-items: center;
-}
+  padding: 0 var(--padding);
+  padding-bottom: 0;
+  padding-right: 24px; // + reserved space for .pinIcon
 
-.iconCell > div * {
-  font-size: var(--unit);
-}
+  > span {
+    overflow: hidden;
+    text-overflow: ellipsis;  
+    padding-left: var(--padding);
+  }
 
-.nameCell {
+  :global(.HotbarIcon){
+    align-self: center;
+
+    div {
+      /* icons with plain text */
+      font-size: var(--unit);
+    }
+
+    .Icon {
+      /* icons with font-icon */
+      font-size: var(--small-size);
+    }
+  }
+
+  .pinIcon {
+    transition: none;
+    opacity: 0;
+    margin-left: var(--padding);
+
+    &:hover {
+      /* Drop styles defined for <Icon/>  */
+      background-color: transparent;
+      box-shadow: none;
+    }
+  }
 }
 
 .sourceCell {
@@ -38,14 +79,16 @@
 
 .statusCell {
   max-width: 100px;
-}
 
-.connected, .available {
-  color: var(--colorSuccess);
-}
+  :global {
+    .connected, .available {
+      color: var(--colorSuccess);
+    }
 
-.disconnected, .deleting, .unavailable {
-  color: var(--halfGray);
+    .disconnected, .deleting, .unavailable {
+      color: var(--halfGray);
+    }
+  }
 }
 
 .labelsCell {
@@ -96,4 +139,8 @@
 .activeTab, .activeTab:hover {
   background-color: var(--blue);
   --color-active: white;
+}
+
+.catalogAvatar {
+  font-size: 1.2ch;
 }

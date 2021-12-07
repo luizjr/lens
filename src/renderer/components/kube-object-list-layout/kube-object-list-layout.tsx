@@ -19,52 +19,91 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+import "./kube-object-list-layout.scss";
+
 import React from "react";
-import { computed, makeObservable } from "mobx";
+import { computed, makeObservable, observable, reaction } from "mobx";
 import { disposeOnUnmount, observer } from "mobx-react";
-import { cssNames } from "../../utils";
+import { cssNames, Disposer } from "../../utils";
 import type { KubeObject } from "../../../common/k8s-api/kube-object";
 import { ItemListLayout, ItemListLayoutProps } from "../item-object-list/item-list-layout";
 import type { KubeObjectStore } from "../../../common/k8s-api/kube-object.store";
 import { KubeObjectMenu } from "../kube-object-menu";
 import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
-import { clusterContext } from "../context";
 import { NamespaceSelectFilter } from "../+namespaces/namespace-select-filter";
 import { ResourceKindMap, ResourceNames } from "../../utils/rbac";
 import { kubeSelectedUrlParam, toggleDetails } from "../kube-detail-params";
+import { Icon } from "../icon";
+import { TooltipPosition } from "../tooltip";
+import type { ClusterContext } from "../../../common/k8s-api/cluster-context";
 
 export interface KubeObjectListLayoutProps<K extends KubeObject> extends ItemListLayoutProps<K> {
   store: KubeObjectStore<K>;
   dependentStores?: KubeObjectStore<KubeObject>[];
+  subscribeStores?: boolean;
 }
 
 const defaultProps: Partial<KubeObjectListLayoutProps<KubeObject>> = {
   onDetails: (item: KubeObject) => toggleDetails(item.selfLink),
+  subscribeStores: true,
 };
 
 @observer
 export class KubeObjectListLayout<K extends KubeObject> extends React.Component<KubeObjectListLayoutProps<K>> {
   static defaultProps = defaultProps as object;
+  static clusterContext: ClusterContext;
 
   constructor(props: KubeObjectListLayoutProps<K>) {
     super(props);
     makeObservable(this);
   }
 
+  @observable loadErrors: string[] = [];
+
   @computed get selectedItem() {
     return this.props.store.getByPath(kubeSelectedUrlParam.get());
   }
 
   componentDidMount() {
-    const { store, dependentStores = [] } = this.props;
+    const { store, dependentStores = [], subscribeStores } = this.props;
     const stores = Array.from(new Set([store, ...dependentStores]));
+    const reactions: Disposer[] = [
+      reaction(() => KubeObjectListLayout.clusterContext.contextNamespaces.slice(), () => {
+        // clear load errors
+        this.loadErrors.length = 0;
+      }),
+    ];
 
-    disposeOnUnmount(this, [
-      kubeWatchApi.subscribeStores(stores, {
-        preload: true,
-        namespaces: clusterContext.contextNamespaces,
-      })
-    ]);
+    if (subscribeStores) {
+      reactions.push(
+        kubeWatchApi.subscribeStores(stores, {
+          onLoadFailure: error => this.loadErrors.push(String(error)),
+        }),
+      );
+    }
+
+    disposeOnUnmount(this, reactions);
+  }
+
+  renderLoadErrors() {
+    if (this.loadErrors.length === 0) {
+      return null;
+    }
+
+    return (
+      <Icon
+        material="warning"
+        className="load-error"
+        tooltip={{
+          children: (
+            <>
+              {this.loadErrors.map((error, index) => <p key={index}>{error}</p>)}
+            </>
+          ),
+          preferredPositions: TooltipPosition.BOTTOM,
+        }}
+      />
+    );
   }
 
   render() {
@@ -80,7 +119,7 @@ export class KubeObjectListLayout<K extends KubeObject> extends React.Component<
         preloadStores={false} // loading handled in kubeWatchApi.subscribeStores()
         detailsItem={this.selectedItem}
         customizeHeader={[
-          ({ filters, searchProps, ...headerPlaceHolders }) => ({
+          ({ filters, searchProps, info, ...headerPlaceHolders }) => ({
             filters: (
               <>
                 {filters}
@@ -91,6 +130,12 @@ export class KubeObjectListLayout<K extends KubeObject> extends React.Component<
               ...searchProps,
               placeholder: `Search ${placeholderString}...`,
             },
+            info: (
+              <>
+                {info}
+                {this.renderLoadErrors()}
+              </>
+            ),
             ...headerPlaceHolders,
           }),
           ...[customizeHeader].flat(),

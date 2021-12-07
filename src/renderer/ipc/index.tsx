@@ -21,7 +21,7 @@
 
 import React from "react";
 import { ipcRenderer, IpcRendererEvent } from "electron";
-import { areArgsUpdateAvailableFromMain, UpdateAvailableChannel, onCorrect, UpdateAvailableFromMain, BackchannelArg, ClusterListNamespaceForbiddenChannel, isListNamespaceForbiddenArgs, ListNamespaceForbiddenArgs, HotbarTooManyItems } from "../../common/ipc";
+import { areArgsUpdateAvailableFromMain, UpdateAvailableChannel, onCorrect, UpdateAvailableFromMain, BackchannelArg, ClusterListNamespaceForbiddenChannel, isListNamespaceForbiddenArgs, ListNamespaceForbiddenArgs, HotbarTooManyItems, ipcRendererOn, AutoUpdateChecking, AutoUpdateNoUpdateAvailable } from "../../common/ipc";
 import { Notifications, notificationsStore } from "../components/notifications";
 import { Button } from "../components/button";
 import { isMac } from "../../common/vars";
@@ -72,21 +72,20 @@ function UpdateAvailableHandler(event: IpcRendererEvent, ...[backchannel, update
       id: notificationId,
       onClose() {
         sendToBackchannel(backchannel, notificationId, { doUpdate: false });
-      }
-    }
+      },
+    },
   );
 }
 
-const listNamespacesForbiddenHandlerDisplayedAt = new Map<string, number>();
+const notificationLastDisplayedAt = new Map<string, number>();
 const intervalBetweenNotifications = 1000 * 60; // 60s
 
 function ListNamespacesForbiddenHandler(event: IpcRendererEvent, ...[clusterId]: ListNamespaceForbiddenArgs): void {
-  const lastDisplayedAt = listNamespacesForbiddenHandlerDisplayedAt.get(clusterId);
-  const wasDisplayed = Boolean(lastDisplayedAt);
+  const lastDisplayedAt = notificationLastDisplayedAt.get(clusterId);
   const now = Date.now();
 
-  if (!wasDisplayed || (now - lastDisplayedAt) > intervalBetweenNotifications) {
-    listNamespacesForbiddenHandlerDisplayedAt.set(clusterId, now);
+  if (!notificationLastDisplayedAt.has(clusterId) || (now - lastDisplayedAt) > intervalBetweenNotifications) {
+    notificationLastDisplayedAt.set(clusterId, now);
   } else {
     // don't bother the user too often
     return;
@@ -94,22 +93,40 @@ function ListNamespacesForbiddenHandler(event: IpcRendererEvent, ...[clusterId]:
 
   const notificationId = `list-namespaces-forbidden:${clusterId}`;
 
+  if (notificationsStore.getById(notificationId)) {
+    // notification is still visible
+    return;
+  }
+
   Notifications.info(
     (
       <div className="flex column gaps">
         <b>Add Accessible Namespaces</b>
-        <p>Cluster <b>{ClusterStore.getInstance().getById(clusterId).name}</b> does not have permissions to list namespaces. Please add the namespaces you have access to.</p>
+        <p>
+          Cluster <b>{ClusterStore.getInstance().getById(clusterId).name}</b> does not have permissions to list namespaces.{" "}
+          Please add the namespaces you have access to.
+        </p>
         <div className="flex gaps row align-left box grow">
-          <Button active outlined label="Go to Accessible Namespaces Settings" onClick={() => {
-            navigate(entitySettingsURL({ params: { entityId: clusterId }, fragment: "accessible-namespaces" }));
-            notificationsStore.remove(notificationId);
-          }} />
+          <Button
+            active
+            outlined
+            label="Go to Accessible Namespaces Settings"
+            onClick={() => {
+              navigate(entitySettingsURL({ params: { entityId: clusterId }, fragment: "namespaces" }));
+              notificationsStore.remove(notificationId);
+            }}
+          />
         </div>
       </div>
     ),
     {
       id: notificationId,
-    }
+      /**
+       * Set the time when the notification is closed as well so that there is at
+       * least a minute between closing the notification as seeing it again
+       */
+      onClose: () => notificationLastDisplayedAt.set(clusterId, Date.now()),
+    },
   );
 }
 
@@ -135,5 +152,11 @@ export function registerIpcListeners() {
     channel: HotbarTooManyItems,
     listener: HotbarTooManyItemsHandler,
     verifier: (args: unknown[]): args is [] => args.length === 0,
+  });
+  ipcRendererOn(AutoUpdateChecking, () => {
+    Notifications.shortInfo("Checking for updates");
+  });
+  ipcRendererOn(AutoUpdateNoUpdateAvailable, () => {
+    Notifications.shortInfo("No update is currently available");
   });
 }

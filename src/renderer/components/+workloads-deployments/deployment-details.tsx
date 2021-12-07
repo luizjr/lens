@@ -42,6 +42,8 @@ import { DeploymentReplicaSets } from "./deployment-replicasets";
 import { getActiveClusterEntity } from "../../api/catalog-entity-registry";
 import { ClusterMetricsResourceType } from "../../../common/cluster-types";
 import { boundMethod } from "../../utils";
+import logger from "../../../common/logger";
+import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
 
 interface Props extends KubeObjectDetailsProps<Deployment> {
 }
@@ -55,14 +57,16 @@ export class DeploymentDetails extends React.Component<Props> {
     makeObservable(this);
   }
 
-  @disposeOnUnmount
-  clean = reaction(() => this.props.object, () => {
-    this.metrics = null;
-  });
-
   componentDidMount() {
-    podsStore.reloadAll();
-    replicaSetStore.reloadAll();
+    disposeOnUnmount(this, [
+      reaction(() => this.props.object, () => {
+        this.metrics = null;
+      }),
+      kubeWatchApi.subscribeStores([
+        podsStore,
+        replicaSetStore,
+      ]),
+    ]);
   }
 
   @boundMethod
@@ -75,7 +79,16 @@ export class DeploymentDetails extends React.Component<Props> {
   render() {
     const { object: deployment } = this.props;
 
-    if (!deployment) return null;
+    if (!deployment) {
+      return null;
+    }
+
+    if (!(deployment instanceof Deployment)) {
+      logger.error("[DeploymentDetails]: passed object that is not an instanceof Deployment", deployment);
+
+      return null;
+    }
+
     const { status, spec } = deployment;
     const nodeSelector = deployment.getNodeSelectors();
     const selectors = deployment.getSelectors();

@@ -21,14 +21,15 @@
 
 import { autoUpdater, UpdateInfo } from "electron-updater";
 import logger from "./logger";
-import { isDevelopment, isPublishConfigured, isTestEnv } from "../common/vars";
+import { isLinux, isMac, isPublishConfigured, isTestEnv } from "../common/vars";
 import { delay } from "../common/utils";
-import { areArgsUpdateAvailableToBackchannel, AutoUpdateLogPrefix, broadcastMessage, onceCorrect, UpdateAvailableChannel, UpdateAvailableToBackchannel } from "../common/ipc";
+import { areArgsUpdateAvailableToBackchannel, AutoUpdateChecking, AutoUpdateLogPrefix, AutoUpdateNoUpdateAvailable, broadcastMessage, onceCorrect, UpdateAvailableChannel, UpdateAvailableToBackchannel } from "../common/ipc";
 import { once } from "lodash";
 import { ipcMain } from "electron";
 import { nextUpdateChannel } from "./utils/update-channel";
+import { UserStore } from "../common/user-store";
+import { autoUpdater as electronAutoUpdater } from "electron";
 
-const updateChannel = autoUpdater.channel;
 let installVersion: null | string = null;
 
 export function isAutoUpdateEnabled() {
@@ -39,7 +40,25 @@ function handleAutoUpdateBackChannel(event: Electron.IpcMainEvent, ...[arg]: Upd
   if (arg.doUpdate) {
     if (arg.now) {
       logger.info(`${AutoUpdateLogPrefix}: User chose to update now`);
-      autoUpdater.quitAndInstall(true, true);
+      setImmediate(() => {
+        if (isMac) {
+          /**
+           * This is a necessary workaround until electron-updater is fixed.
+           * The problem is that it downloads it but then never tries to
+           * download it from itself via electron.
+           */
+          electronAutoUpdater.checkForUpdates();
+        } else if (isLinux) {
+          /**
+           * This is a necessary workaround until electron-updater is fixed.
+           * The problem is that because linux updating is not implemented at
+           * all via electron. Electron's autoUpdater.quitAndInstall() is never
+           * called.
+           */
+          electronAutoUpdater.emit("before-quit-for-update");
+        }
+        autoUpdater.quitAndInstall(true, true);
+      });
     } else {
       logger.info(`${AutoUpdateLogPrefix}: User chose to update on quit`);
       autoUpdater.autoInstallOnAppQuit = true;
@@ -49,18 +68,28 @@ function handleAutoUpdateBackChannel(event: Electron.IpcMainEvent, ...[arg]: Upd
   }
 }
 
+autoUpdater.logger = {
+  info: message => logger.info(`[AUTO-UPDATE]: electron-updater:`, message),
+  warn: message => logger.warn(`[AUTO-UPDATE]: electron-updater:`, message),
+  error: message => logger.error(`[AUTO-UPDATE]: electron-updater:`, message),
+  debug: message => logger.debug(`[AUTO-UPDATE]: electron-updater:`, message),
+};
+
 /**
  * starts the automatic update checking
  * @param interval milliseconds between interval to check on, defaults to 24h
  */
 export const startUpdateChecking = once(function (interval = 1000 * 60 * 60 * 24): void {
-  if (isDevelopment || isTestEnv) {
+  if (!isAutoUpdateEnabled() || isTestEnv) {
     return;
   }
 
-  autoUpdater.logger = logger;
+  const userStore = UserStore.getInstance();
+
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.channel = userStore.updateChannel;
+  autoUpdater.allowDowngrade = userStore.isAllowedToDowngrade;
 
   autoUpdater
     .on("update-available", (info: UpdateInfo) => {
@@ -104,11 +133,17 @@ export const startUpdateChecking = once(function (interval = 1000 * 60 * 60 * 24
       }
     })
     .on("update-not-available", () => {
-      const nextChannel = nextUpdateChannel(updateChannel, autoUpdater.channel);
+      const nextChannel = nextUpdateChannel(userStore.updateChannel, autoUpdater.channel);
 
       logger.info(`${AutoUpdateLogPrefix}: update not available from ${autoUpdater.channel}, will check ${nextChannel} channel next`);
 
-      autoUpdater.channel = nextChannel;
+      if (nextChannel !== autoUpdater.channel) {
+        autoUpdater.channel = nextChannel;
+        autoUpdater.checkForUpdates()
+          .catch(error => logger.error(`${AutoUpdateLogPrefix}: failed with an error`, error));
+      } else {
+        broadcastMessage(AutoUpdateNoUpdateAvailable);
+      }
     });
 
   async function helper() {
@@ -122,11 +157,16 @@ export const startUpdateChecking = once(function (interval = 1000 * 60 * 60 * 24
 });
 
 export async function checkForUpdates(): Promise<void> {
+  const userStore = UserStore.getInstance();
+
   try {
     logger.info(`📡 Checking for app updates`);
 
+    autoUpdater.channel = userStore.updateChannel;
+    autoUpdater.allowDowngrade = userStore.isAllowedToDowngrade;
+    broadcastMessage(AutoUpdateChecking);
     await autoUpdater.checkForUpdates();
   } catch (error) {
-    logger.error(`${AutoUpdateLogPrefix}: failed with an error`, { error: String(error) });
+    logger.error(`${AutoUpdateLogPrefix}: failed with an error`, error);
   }
 }

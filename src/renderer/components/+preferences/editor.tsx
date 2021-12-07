@@ -22,53 +22,70 @@ import { observer } from "mobx-react";
 import React from "react";
 import { UserStore } from "../../../common/user-store";
 import { FormSwitch, Switcher } from "../switch";
+import { Select } from "../select";
 import { SubTitle } from "../layout/sub-title";
-import { Input } from "../input";
-import { isNumber } from "../input/input_validators";
-import { Select, SelectOption } from "../select";
+import { SubHeader } from "../layout/sub-header";
+import { Input, InputValidators } from "../input";
 
 enum EditorLineNumbersStyles {
   on = "On",
   off = "Off",
   relative = "Relative",
-  interval = "Interval"
+  interval = "Interval",
 }
 
 export const Editor = observer(() => {
+  const editorConfiguration = UserStore.getInstance().editorConfiguration;
 
   return (
     <section id="editor">
       <h2 data-testid="editor-configuration-header">Editor configuration</h2>
+
+      <SubTitle title="Minimap"/>
       <section>
-        <FormSwitch
-          control={
-            <Switcher
-              checked={UserStore.getInstance().editorConfiguration.miniMap.enabled}
-              onChange={v => UserStore.getInstance().enableEditorMinimap(v.target.checked)}
-              name="minimap"
+        <div className="flex gaps justify-space-between">
+          <div className="flex gaps align-center">
+            <FormSwitch
+              label={<SubHeader compact>Show minimap</SubHeader>}
+              control={
+                <Switcher
+                  checked={editorConfiguration.minimap.enabled}
+                  onChange={(evt, checked) => editorConfiguration.minimap.enabled = checked}
+                />
+              }
             />
-          }
-          label="Show minimap"
-        />
+          </div>
+          <div className="flex gaps align-center">
+            <SubHeader compact>Position</SubHeader>
+            <Select
+              themeName="lens"
+              options={["left", "right"]}
+              value={editorConfiguration.minimap.side}
+              onChange={({ value }) => editorConfiguration.minimap.side = value}
+            />
+          </div>
+        </div>
       </section>
+
       <section>
         <SubTitle title="Line numbers"/>
         <Select
-          options={Object.entries(EditorLineNumbersStyles).map(entry => ({label: entry[1], value: entry[0]}))}
-          value={UserStore.getInstance().editorConfiguration?.lineNumbers}
-          onChange={({ value }: SelectOption) => UserStore.getInstance().setEditorLineNumbers(value)}
+          options={Object.entries(EditorLineNumbersStyles).map(([value, label]) => ({ label, value }))}
+          value={editorConfiguration.lineNumbers}
+          onChange={({ value }) => editorConfiguration.lineNumbers = value}
           themeName="lens"
         />
       </section>
+
       <section>
         <SubTitle title="Tab size"/>
         <Input
           theme="round-black"
+          type="number"
           min={1}
-          max={10}
-          validators={[isNumber]}
-          value={UserStore.getInstance().editorConfiguration.tabSize?.toString()}
-          onChange={(value) => {(Number(value) || value=="") && UserStore.getInstance().setEditorTabSize(Number(value));}}
+          validators={InputValidators.isNumber}
+          value={editorConfiguration.tabSize.toString()}
+          onChange={value => editorConfiguration.tabSize = Number(value)}
         />
       </section>
     </section>

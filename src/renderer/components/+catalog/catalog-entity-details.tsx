@@ -19,18 +19,18 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import "./catalog-entity-details.scss";
+import styles from "./catalog-entity-details.module.css";
 import React, { Component } from "react";
 import { observer } from "mobx-react";
 import { Drawer, DrawerItem } from "../drawer";
-import { catalogEntityRunContext } from "../../api/catalog-entity";
 import type { CatalogCategory, CatalogEntity } from "../../../common/catalog";
 import { Icon } from "../icon";
 import { CatalogEntityDrawerMenu } from "./catalog-entity-drawer-menu";
 import { CatalogEntityDetailRegistry } from "../../../extensions/registries";
-import { HotbarIcon } from "../hotbar/hotbar-icon";
-import type { CatalogEntityItem } from "./catalog-entity.store";
+import type { CatalogEntityItem } from "./catalog-entity-item";
 import { isDevelopment } from "../../../common/vars";
+import { cssNames } from "../../utils";
+import { Avatar } from "../avatar";
 
 interface Props<T extends CatalogEntity> {
   item: CatalogEntityItem<T> | null | undefined;
@@ -58,25 +58,27 @@ export class CatalogEntityDetails<T extends CatalogEntity> extends Component<Pro
     return (
       <>
         {showDetails && (
-          <div className="flex CatalogEntityDetails">
-            <div className="EntityIcon box top left">
-              <HotbarIcon
-                uid={item.id}
+          <div className="flex">
+            <div className={styles.entityIcon}>
+              <Avatar
                 title={item.name}
-                source={item.source}
+                colorHash={`${item.name}-${item.source}`}
+                size={128}
                 src={item.entity.spec.icon?.src}
-                material={item.entity.spec.icon?.material}
+                data-testid="detail-panel-hot-bar-icon"
                 background={item.entity.spec.icon?.background}
-                disabled={!item?.enabled}
-                onClick={() => item.onRun(catalogEntityRunContext)}
-                size={128} />
+                onClick={() => item.onRun()}
+                className={styles.avatar}
+              >
+                {item.entity.spec.icon?.material && <Icon material={item.entity.spec.icon?.material}/>}
+              </Avatar>
               {item?.enabled && (
-                <div className="IconHint">
+                <div className={styles.hint}>
                   Click to open
                 </div>
               )}
             </div>
-            <div className="box grow EntityMetadata">
+            <div className={cssNames("box grow", styles.metadata)}>
               <DrawerItem name="Name">
                 {item.name}
               </DrawerItem>
@@ -113,7 +115,7 @@ export class CatalogEntityDetails<T extends CatalogEntity> extends Component<Pro
 
     return (
       <Drawer
-        className="CatalogEntityDetails"
+        className={styles.entityDetails}
         usePortal={true}
         open={true}
         title={title}

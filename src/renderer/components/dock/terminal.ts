@@ -24,18 +24,17 @@ import { reaction } from "mobx";
 import { Terminal as XTerm } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import { dockStore, TabId } from "./dock.store";
-import type { TerminalApi } from "../../api/terminal-api";
+import { TerminalApi, TerminalChannels } from "../../api/terminal-api";
 import { ThemeStore } from "../../theme.store";
-import { boundMethod } from "../../utils";
+import { boundMethod, disposer } from "../../utils";
 import { isMac } from "../../../common/vars";
-import { camelCase } from "lodash";
+import { camelCase, once } from "lodash";
 import { UserStore } from "../../../common/user-store";
 import { clipboard } from "electron";
+import logger from "../../../common/logger";
 
 export class Terminal {
-  static spawningPool: HTMLElement;
-
-  static init() {
+  public static readonly spawningPool = (() => {
     // terminal element must be in DOM before attaching via xterm.open(elem)
     // https://xtermjs.org/docs/api/terminal/classes/terminal/#open
     const pool = document.createElement("div");
@@ -43,8 +42,9 @@ export class Terminal {
     pool.className = "terminal-init";
     pool.style.cssText = "position: absolute; top: 0; left: 0; height: 0; visibility: hidden; overflow: hidden";
     document.body.appendChild(pool);
-    Terminal.spawningPool = pool;
-  }
+
+    return pool;
+  })();
 
   static async preloadFonts() {
     const fontPath = require("../fonts/roboto-mono-nerd.ttf").default; // eslint-disable-line @typescript-eslint/no-var-requires
@@ -54,13 +54,22 @@ export class Terminal {
     document.fonts.add(fontFace);
   }
 
-  public xterm: XTerm;
-  public fitAddon: FitAddon;
-  public scrollPos = 0;
-  public disposers: Function[] = [];
+  private xterm: XTerm | null = new XTerm({
+    cursorBlink: true,
+    cursorStyle: "bar",
+    fontSize: 13,
+    fontFamily: "RobotoMono",
+  });
+  private readonly fitAddon = new FitAddon();
+  private scrollPos = 0;
+  private disposer = disposer();
 
   @boundMethod
   protected setTheme(colors: Record<string, string>) {
+    if (!this.xterm) {
+      return;
+    }
+
     // Replacing keys stored in styles to format accepted by terminal
     // E.g. terminalBrightBlack -> brightBlack
     const colorPrefix = "terminal";
@@ -73,15 +82,11 @@ export class Terminal {
   }
 
   get elem() {
-    return this.xterm.element;
+    return this.xterm?.element;
   }
 
   get viewport() {
     return this.xterm.element.querySelector(".xterm-viewport");
-  }
-
-  constructor(public tabId: TabId, protected api: TerminalApi) {
-    this.init();
   }
 
   get isActive() {
@@ -96,22 +101,15 @@ export class Terminal {
   }
 
   detach() {
-    Terminal.spawningPool.appendChild(this.elem);
+    const { elem } = this;
+
+    if (elem) {
+      Terminal.spawningPool.appendChild(elem);
+    }
   }
 
-  async init() {
-    if (this.xterm) {
-      return;
-    }
-    this.xterm = new XTerm({
-      cursorBlink: true,
-      cursorStyle: "bar",
-      fontSize: 13,
-      fontFamily: "RobotoMono"
-    });
-
+  constructor(public tabId: TabId, protected api: TerminalApi) {
     // enable terminal addons
-    this.fitAddon = new FitAddon();
     this.xterm.loadAddon(this.fitAddon);
 
     this.xterm.open(Terminal.spawningPool);
@@ -121,16 +119,18 @@ export class Terminal {
 
     // bind events
     const onDataHandler = this.xterm.onData(this.onData);
+    const clearOnce = once(this.onClear);
 
     this.viewport.addEventListener("scroll", this.onScroll);
     this.elem.addEventListener("contextmenu", this.onContextMenu);
-    this.api.onReady.addListener(this.onClear, { once: true }); // clear status logs (connecting..)
-    this.api.onData.addListener(this.onApiData);
+    this.api.once("ready", clearOnce);
+    this.api.once("connected", clearOnce);
+    this.api.on("data", this.onApiData);
     window.addEventListener("resize", this.onResize);
 
-    this.disposers.push(
+    this.disposer.push(
       reaction(() => ThemeStore.getInstance().activeTheme.colors, this.setTheme, {
-        fireImmediately: true
+        fireImmediately: true,
       }),
       dockStore.onResize(this.onResize),
       () => onDataHandler.dispose(),
@@ -142,16 +142,18 @@ export class Terminal {
   }
 
   destroy() {
-    if (!this.xterm) return;
-    this.disposers.forEach(dispose => dispose());
-    this.disposers = [];
-    this.xterm.dispose();
-    this.xterm = null;
+    if (this.xterm) {
+      this.disposer();
+      this.xterm.dispose();
+      this.xterm = null;
+    }
   }
 
   fit = () => {
     // Since this function is debounced we need to read this value as late as possible
-    if (!this.isActive) return;
+    if (!this.isActive || !this.xterm) {
+      return;
+    }
 
     try {
       this.fitAddon.fit();
@@ -159,9 +161,8 @@ export class Terminal {
 
       this.api.sendTerminalSize(cols, rows);
     } catch (error) {
-      console.error(error);
-
-      return; // see https://github.com/lensapp/lens/issues/1891
+      // see https://github.com/lensapp/lens/issues/1891
+      logger.error(`[TERMINAL]: failed to resize terminal to fit`, error);
     }
   };
 
@@ -177,7 +178,10 @@ export class Terminal {
 
   onData = (data: string) => {
     if (!this.api.isReady) return;
-    this.api.sendCommand(data);
+    this.api.sendMessage({
+      type: TerminalChannels.STDIN,
+      data,
+    });
   };
 
   onScroll = () => {
@@ -204,25 +208,27 @@ export class Terminal {
   };
 
   onContextMenu = () => {
-    const { terminalCopyOnSelect } = UserStore.getInstance();
-    const textFromClipboard = clipboard.readText();
+    if (
+      // don't paste if user hasn't turned on the feature
+      UserStore.getInstance().terminalCopyOnSelect
 
-    if (terminalCopyOnSelect) {
-      this.xterm.paste(textFromClipboard);
+      // don't paste if the clipboard doesn't have text
+      && clipboard.availableFormats().includes("text/plain")
+    ) {
+      this.xterm.paste(clipboard.readText());
     }
   };
 
   onSelectionChange = () => {
-    const { terminalCopyOnSelect } = UserStore.getInstance();
     const selection = this.xterm.getSelection().trim();
 
-    if (terminalCopyOnSelect && selection !== "") {
+    if (UserStore.getInstance().terminalCopyOnSelect && selection) {
       clipboard.writeText(selection);
     }
   };
 
   keyHandler = (evt: KeyboardEvent): boolean => {
-    const { code, ctrlKey, type, metaKey } = evt;
+    const { code, ctrlKey, metaKey } = evt;
 
     // Handle custom hotkey bindings
     if (ctrlKey) {
@@ -248,13 +254,6 @@ export class Terminal {
       }
     }
 
-    // Pass the event above in DOM for <Dock/> to handle common actions
-    if (!evt.defaultPrevented) {
-      this.elem.dispatchEvent(new KeyboardEvent(type, evt));
-    }
-
     return true;
   };
 }
-
-Terminal.init();

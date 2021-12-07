@@ -23,11 +23,21 @@ import { UserStore } from "../../common/user-store";
 import { ContextHandler } from "../context-handler";
 import { PrometheusProvider, PrometheusProviderRegistry, PrometheusService } from "../prometheus";
 import mockFs from "mock-fs";
+import { AppPaths } from "../../common/app-paths";
 
 jest.mock("electron", () => ({
   app: {
+    getVersion: () => "99.99.99",
+    getName: () => "lens",
+    setName: jest.fn(),
+    setPath: jest.fn(),
     getPath: () => "tmp",
+    getLocale: () => "en",
     setLoginItemSettings: jest.fn(),
+  },
+  ipcMain: {
+    on: jest.fn(),
+    handle: jest.fn(),
   },
 }));
 
@@ -76,10 +86,12 @@ function getHandler() {
   }) as any);
 }
 
+AppPaths.init();
+
 describe("ContextHandler", () => {
   beforeEach(() => {
     mockFs({
-      "tmp": {}
+      "tmp": {},
     });
 
     PrometheusProviderRegistry.createInstance();
@@ -98,7 +110,7 @@ describe("ContextHandler", () => {
       [0, 1],
       [0, 2],
       [0, 3],
-    ])("should return undefined from %d success(es) after %d failure(s)", async (successes, failures) => {
+    ])("should throw from %d success(es) after %d failure(s)", async (successes, failures) => {
       const reg = PrometheusProviderRegistry.getInstance();
       let count = 0;
 
@@ -112,9 +124,7 @@ describe("ContextHandler", () => {
         reg.registerProvider(new TestProvider(`id_${count++}`, ServiceResult.Success));
       }
 
-      const service = await getHandler().getPrometheusService();
-
-      expect(service).toBeUndefined();
+      expect(() => (getHandler() as any).getPrometheusService()).rejects.toBeDefined();
     });
 
     it.each([
@@ -140,7 +150,7 @@ describe("ContextHandler", () => {
         reg.registerProvider(new TestProvider(`id_${count++}`, ServiceResult.Success));
       }
 
-      const service = await getHandler().getPrometheusService();
+      const service = await (getHandler() as any).getPrometheusService();
 
       expect(service.id === `id_${failures}`);
     });
@@ -168,7 +178,7 @@ describe("ContextHandler", () => {
         reg.registerProvider(new TestProvider(`id_${count++}`, serviceResult));
       }
 
-      const service = await getHandler().getPrometheusService();
+      const service = await (getHandler() as any).getPrometheusService();
 
       expect(service.id === "id_0");
     });
@@ -202,7 +212,7 @@ describe("ContextHandler", () => {
         reg.registerProvider(new TestProvider(`id_${count++}`, ServiceResult.Success));
       }
 
-      const service = await getHandler().getPrometheusService();
+      const service = await (getHandler() as any).getPrometheusService();
 
       expect(service.id === "id_0");
     });
@@ -215,7 +225,7 @@ describe("ContextHandler", () => {
       reg.registerProvider(new TestProvider(`id_${count++}`, ServiceResult.Success));
       reg.registerProvider(new TestProvider(`id_${count++}`, ServiceResult.Success));
 
-      const service = await getHandler().getPrometheusService();
+      const service = await (getHandler() as any).getPrometheusService();
 
       expect(service.id).not.toBe("id_2");
     });

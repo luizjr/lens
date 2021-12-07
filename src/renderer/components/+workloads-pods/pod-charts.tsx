@@ -51,8 +51,10 @@ export const PodCharts = observer(() => {
     cpuUsage,
     memoryUsage,
     fsUsage,
+    fsWrites,
+    fsReads,
     networkReceive,
-    networkTransmit
+    networkTransmit,
   } = mapValues(metrics, metric => normalizeMetrics(metric).data.result[0].values);
 
   const datasets = [
@@ -63,8 +65,8 @@ export const PodCharts = observer(() => {
         label: `Usage`,
         tooltip: `Container CPU cores usage`,
         borderColor: "#3D90CE",
-        data: cpuUsage.map(([x, y]) => ({ x, y }))
-      }
+        data: cpuUsage.map(([x, y]) => ({ x, y })),
+      },
     ],
     // Memory
     [
@@ -73,7 +75,7 @@ export const PodCharts = observer(() => {
         label: `Usage`,
         tooltip: `Container memory usage`,
         borderColor: "#c93dce",
-        data: memoryUsage.map(([x, y]) => ({ x, y }))
+        data: memoryUsage.map(([x, y]) => ({ x, y })),
       },
     ],
     // Network
@@ -83,15 +85,15 @@ export const PodCharts = observer(() => {
         label: `Receive`,
         tooltip: `Bytes received by all containers`,
         borderColor: "#64c5d6",
-        data: networkReceive.map(([x, y]) => ({ x, y }))
+        data: networkReceive.map(([x, y]) => ({ x, y })),
       },
       {
         id: `${id}-networkTransmit`,
         label: `Transmit`,
         tooltip: `Bytes transmitted from all containers`,
         borderColor: "#46cd9e",
-        data: networkTransmit.map(([x, y]) => ({ x, y }))
-      }
+        data: networkTransmit.map(([x, y]) => ({ x, y })),
+      },
     ],
     // Filesystem
     [
@@ -100,9 +102,23 @@ export const PodCharts = observer(() => {
         label: `Usage`,
         tooltip: `Bytes consumed on this filesystem`,
         borderColor: "#ffc63d",
-        data: fsUsage.map(([x, y]) => ({ x, y }))
-      }
-    ]
+        data: fsUsage.map(([x, y]) => ({ x, y })),
+      },
+      {
+        id: `${id}-fsWrites`,
+        label: `Writes`,
+        tooltip: `Bytes written on this filesystem`,
+        borderColor: "#ff963d",
+        data: fsWrites.map(([x, y]) => ({ x, y })),
+      },
+      {
+        id: `${id}-fsReads`,
+        label: `Reads`,
+        tooltip: `Bytes read on this filesystem`,
+        borderColor: "#fff73d",
+        data: fsReads.map(([x, y]) => ({ x, y })),
+      },
+    ],
   ];
 
   return (

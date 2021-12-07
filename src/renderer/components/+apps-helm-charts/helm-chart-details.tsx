@@ -23,8 +23,8 @@ import "./helm-chart-details.scss";
 
 import React, { Component } from "react";
 import { getChartDetails, HelmChart } from "../../../common/k8s-api/endpoints/helm-charts.api";
-import { observable, autorun, makeObservable } from "mobx";
-import { observer } from "mobx-react";
+import { observable, makeObservable, reaction } from "mobx";
+import { disposeOnUnmount, observer } from "mobx-react";
 import { Drawer, DrawerItem } from "../drawer";
 import { boundMethod, stopPropagation } from "../../utils";
 import { MarkdownViewer } from "../markdown-viewer";
@@ -43,15 +43,15 @@ interface Props {
 const LargeTooltip = withStyles({
   tooltip: {
     fontSize: "var(--font-size-small)",
-  }
+  },
 })(Tooltip);
 
 @observer
 export class HelmChartDetails extends Component<Props> {
   @observable chartVersions: HelmChart[];
-  @observable selectedChart: HelmChart;
-  @observable readme: string = null;
-  @observable error: string = null;
+  @observable selectedChart?: HelmChart;
+  @observable readme?: string;
+  @observable error?: string;
 
   private abortController?: AbortController;
 
@@ -64,20 +64,28 @@ export class HelmChartDetails extends Component<Props> {
     this.abortController?.abort();
   }
 
-  chartUpdater = autorun(() => {
-    this.selectedChart = null;
-    const { chart: { name, repo, version } } = this.props;
+  componentDidMount() {
+    disposeOnUnmount(this, [
+      reaction(() => this.props.chart, async ({ name, repo, version }) => {
+        try {
+          this.selectedChart = undefined;
+          this.chartVersions = undefined;
+          this.readme = undefined;
 
-    getChartDetails(repo, name, { version })
-      .then(result => {
-        this.readme = result.readme;
-        this.chartVersions = result.versions;
-        this.selectedChart = result.versions[0];
-      })
-      .catch(error => {
-        this.error = error;
-      });
-  });
+          const { readme, versions } = await getChartDetails(repo, name, { version });
+
+          this.readme = readme;
+          this.chartVersions = versions;
+          this.selectedChart = versions[0];
+        } catch (error) {
+          this.error = error;
+          this.selectedChart = null;
+        }
+      }, {
+        fireImmediately: true,
+      }),
+    ]);
+  }
 
   @boundMethod
   async onVersionChange({ value: chart }: SelectOption<HelmChart>) {
@@ -87,7 +95,7 @@ export class HelmChartDetails extends Component<Props> {
     try {
       this.abortController?.abort();
       this.abortController = new AbortController();
-      const { chart: { name, repo } } = this.props;
+      const { chart: { name, repo }} = this.props;
       const { readme } = await getChartDetails(repo, name, { version: chart.version, reqInit: { signal: this.abortController.signal }});
 
       this.readme = readme;
@@ -135,7 +143,7 @@ export class HelmChartDetails extends Component<Props> {
                 value: chart,
               }))}
               isOptionDisabled={({ value: chart }) => chart.deprecated}
-              value={selectedChart.getVersion()}
+              value={selectedChart}
               onChange={onVersionChange}
             />
           </DrawerItem>
@@ -144,7 +152,7 @@ export class HelmChartDetails extends Component<Props> {
           </DrawerItem>
           <DrawerItem name="Maintainers" className="maintainers">
             {selectedChart.getMaintainers().map(({ name, email, url }) =>
-              <a key={name} href={url || `mailto:${email}`} target="_blank" rel="noreferrer">{name}</a>
+              <a key={name} href={url || `mailto:${email}`} target="_blank" rel="noreferrer">{name}</a>,
             )}
           </DrawerItem>
           {selectedChart.getKeywords().length > 0 && (
@@ -170,16 +178,16 @@ export class HelmChartDetails extends Component<Props> {
   }
 
   renderContent() {
-    if (!this.selectedChart) {
-      return <Spinner center />;
-    }
-
     if (this.error) {
       return (
         <div className="box grow">
           <p className="error">{this.error}</p>
         </div>
       );
+    }
+
+    if (!this.selectedChart) {
+      return <Spinner center />;
     }
 
     return (

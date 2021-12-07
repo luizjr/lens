@@ -21,7 +21,7 @@
 
 import path from "path";
 import fs from "fs";
-import { promiseExec } from "./promise-exec";
+import { promiseExec } from "../common/utils/promise-exec";
 import logger from "./logger";
 import { ensureDir, pathExists } from "fs-extra";
 import * as lockFile from "proper-lockfile";
@@ -31,7 +31,8 @@ import { customRequest } from "../common/request";
 import { getBundledKubectlVersion } from "../common/utils/app-version";
 import { isDevelopment, isWindows, isTestEnv } from "../common/vars";
 import { SemVer } from "semver";
-import { getPath } from "../common/utils/getPath";
+import { defaultPackageMirror, packageMirrors } from "../common/user-store/preferences-helpers";
+import { AppPaths } from "../common/app-paths";
 
 const bundledVersion = getBundledKubectlVersion();
 const kubectlMap: Map<string, string> = new Map([
@@ -49,11 +50,7 @@ const kubectlMap: Map<string, string> = new Map([
   ["1.18", "1.18.20"],
   ["1.19", "1.19.12"],
   ["1.20", "1.20.8"],
-  ["1.21", bundledVersion]
-]);
-const packageMirrors: Map<string, string> = new Map([
-  ["default", "https://storage.googleapis.com/kubernetes-release/release"],
-  ["china", "https://mirror.azure.cn/kubernetes/kubectl"]
+  ["1.21", bundledVersion],
 ]);
 let bundledPath: string;
 const initScriptVersionString = "# lens-initscript v3\n";
@@ -84,7 +81,7 @@ export class Kubectl {
   protected dirname: string;
 
   static get kubectlDir() {
-    return path.join(getPath("userData"), "binaries", "kubectl");
+    return path.join(AppPaths.get("userData"), "binaries", "kubectl");
   }
 
   public static readonly bundledKubectlVersion: string = bundledVersion;
@@ -260,40 +257,46 @@ export class Kubectl {
 
       return false;
     }
+
     await ensureDir(this.dirname, 0o755);
 
-    return lockFile.lock(this.dirname).then(async (release) => {
+    try {
+      const release = await lockFile.lock(this.dirname);
+
       logger.debug(`Acquired a lock for ${this.kubectlVersion}`);
       const bundled = await this.checkBundled();
       let isValid = await this.checkBinary(this.path, !bundled);
 
       if (!isValid && !bundled) {
-        await this.downloadKubectl().catch((error) => {
-          logger.error(error);
-          logger.debug(`Releasing lock for ${this.kubectlVersion}`);
-          release();
+        try {
+          await this.downloadKubectl();
+        } catch (error) {
+          logger.error(`[KUBECTL]: failed to download kubectl`, error);
+          logger.debug(`[KUBECTL]: Releasing lock for ${this.kubectlVersion}`);
+          await release();
 
           return false;
-        });
+        }
+
         isValid = await this.checkBinary(this.path, false);
       }
 
       if (!isValid) {
-        logger.debug(`Releasing lock for ${this.kubectlVersion}`);
-        release();
+        logger.debug(`[KUBECTL]: Releasing lock for ${this.kubectlVersion}`);
+        await release();
 
         return false;
       }
-      logger.debug(`Releasing lock for ${this.kubectlVersion}`);
-      release();
+
+      logger.debug(`[KUBECTL]: Releasing lock for ${this.kubectlVersion}`);
+      await release();
 
       return true;
-    }).catch((e) => {
-      logger.error(`Failed to get a lock for ${this.kubectlVersion}`);
-      logger.error(e);
+    } catch (error) {
+      logger.error(`[KUBECTL]: Failed to get a lock for ${this.kubectlVersion}`, error);
 
       return false;
-    });
+    }
   }
 
   public async downloadKubectl() {
@@ -349,10 +352,10 @@ export class Kubectl {
     bashScript += `export PATH="${helmPath}:${kubectlPath}:$PATH"\n`;
     bashScript += "export KUBECONFIG=\"$tempkubeconfig\"\n";
 
-    bashScript += "NO_PROXY=\",${NO_PROXY:-localhost},\"\n";
-    bashScript += "NO_PROXY=\"${NO_PROXY//,localhost,/,}\"\n";
-    bashScript += "NO_PROXY=\"${NO_PROXY//,127.0.0.1,/,}\"\n";
-    bashScript += "NO_PROXY=\"localhost,127.0.0.1${NO_PROXY%,}\"\n";
+    bashScript += `NO_PROXY=\",\${NO_PROXY:-localhost},\"\n`;
+    bashScript += `NO_PROXY=\"\${NO_PROXY//,localhost,/,}\"\n`;
+    bashScript += `NO_PROXY=\"\${NO_PROXY//,127.0.0.1,/,}\"\n`;
+    bashScript += `NO_PROXY=\"localhost,127.0.0.1\${NO_PROXY%,}\"\n`;
     bashScript += "export NO_PROXY\n";
     bashScript += "unset tempkubeconfig\n";
     await fsPromises.writeFile(bashScriptPath, bashScript.toString(), { mode: 0o644 });
@@ -374,27 +377,26 @@ export class Kubectl {
     zshScript += `helmpath=\"${helmPath}"\n`;
     zshScript += "p=\":$kubectlpath:\"\n";
     zshScript += "d=\":$PATH:\"\n";
-    zshScript += "d=${d//$p/:}\n";
-    zshScript += "d=${d/#:/}\n";
-    zshScript += "export PATH=\"$helmpath:$kubectlpath:${d/%:/}\"\n";
+    zshScript += `d=\${d//$p/:}\n`;
+    zshScript += `d=\${d/#:/}\n`;
+    zshScript += `export PATH=\"$helmpath:$kubectlpath:\${d/%:/}\"\n`;
     zshScript += "export KUBECONFIG=\"$tempkubeconfig\"\n";
-    zshScript += "NO_PROXY=\",${NO_PROXY:-localhost},\"\n";
-    zshScript += "NO_PROXY=\"${NO_PROXY//,localhost,/,}\"\n";
-    zshScript += "NO_PROXY=\"${NO_PROXY//,127.0.0.1,/,}\"\n";
-    zshScript += "NO_PROXY=\"localhost,127.0.0.1${NO_PROXY%,}\"\n";
+    zshScript += `NO_PROXY=\",\${NO_PROXY:-localhost},\"\n`;
+    zshScript += `NO_PROXY=\"\${NO_PROXY//,localhost,/,}\"\n`;
+    zshScript += `NO_PROXY=\"\${NO_PROXY//,127.0.0.1,/,}\"\n`;
+    zshScript += `NO_PROXY=\"localhost,127.0.0.1\${NO_PROXY%,}\"\n`;
     zshScript += "export NO_PROXY\n";
     zshScript += "unset tempkubeconfig\n";
     zshScript += "unset OLD_ZDOTDIR\n";
     await fsPromises.writeFile(zshScriptPath, zshScript.toString(), { mode: 0o644 });
   }
 
-  protected getDownloadMirror() {
-    const mirror = packageMirrors.get(UserStore.getInstance().downloadMirror);
+  protected getDownloadMirror(): string {
+    // MacOS packages are only available from default
 
-    if (mirror) {
-      return mirror;
-    }
+    const mirror = packageMirrors.get(UserStore.getInstance().downloadMirror)
+      ?? packageMirrors.get(defaultPackageMirror);
 
-    return packageMirrors.get("default"); // MacOS packages are only available from default
+    return mirror.url;
   }
 }

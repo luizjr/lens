@@ -28,7 +28,6 @@ import * as ReactRouter from "react-router";
 import * as ReactRouterDom from "react-router-dom";
 import * as LensExtensionsCommonApi from "../extensions/common-api";
 import * as LensExtensionsRendererApi from "../extensions/renderer-api";
-import { monaco } from "react-monaco-editor";
 import { render } from "react-dom";
 import { delay } from "../common/utils";
 import { isMac, isDevelopment } from "../common/vars";
@@ -36,13 +35,12 @@ import { ClusterStore } from "../common/cluster-store";
 import { UserStore } from "../common/user-store";
 import { ExtensionDiscovery } from "../extensions/extension-discovery";
 import { ExtensionLoader } from "../extensions/extension-loader";
-import { App } from "./components/app";
-import { LensApp } from "./lens-app";
 import { HelmRepoManager } from "../main/helm/helm-repo-manager";
 import { ExtensionInstallationStateStore } from "./components/+extensions/extension-install.store";
 import { DefaultProps } from "./mui-base-theme";
 import configurePackages from "../common/configure-packages";
 import * as initializers from "./initializers";
+import logger from "../common/logger";
 import { HotbarStore } from "../common/hotbar-store";
 import { WeblinkStore } from "../common/weblink-store";
 import { ExtensionsStore } from "../extensions/extensions-store";
@@ -50,9 +48,18 @@ import { FilesystemProvisionerStore } from "../main/extension-filesystem";
 import { ThemeStore } from "./theme.store";
 import { SentryInit } from "../common/sentry";
 import { TerminalStore } from "./components/dock/terminal.store";
-import cloudsMidnight from "./monaco-themes/Clouds Midnight.json";
+import { AppPaths } from "../common/app-paths";
+import { registerCustomThemes } from "./components/monaco-editor";
+import { getDi } from "./components/getDi";
+import { DiContextProvider } from "@ogre-tools/injectable-react";
+import type { DependencyInjectionContainer } from "@ogre-tools/injectable";
 
-configurePackages();
+if (process.isMainFrame) {
+  SentryInit();
+}
+
+configurePackages(); // global packages
+registerCustomThemes(); // monaco editor themes
 
 /**
  * If this is a development build, wait a second to attach
@@ -66,49 +73,67 @@ async function attachChromeDebugger() {
 }
 
 type AppComponent = React.ComponentType & {
-  init?(rootElem: HTMLElement): Promise<void>;
+  init(rootElem: HTMLElement): Promise<void>;
 };
 
-export async function bootstrap(App: AppComponent) {
+export async function bootstrap(comp: () => Promise<AppComponent>, di: DependencyInjectionContainer) {
   const rootElem = document.getElementById("app");
+  const logPrefix = `[BOOTSTRAP-${process.isMainFrame ? "ROOT" : "CLUSTER"}-FRAME]:`;
+
+  await AppPaths.init();
+  UserStore.createInstance();
 
   await attachChromeDebugger();
   rootElem.classList.toggle("is-mac", isMac);
 
+  logger.info(`${logPrefix} initializing Registries`);
   initializers.initRegistries();
+
+  logger.info(`${logPrefix} initializing CommandRegistry`);
   initializers.initCommandRegistry();
+
+  logger.info(`${logPrefix} initializing EntitySettingsRegistry`);
   initializers.initEntitySettingsRegistry();
+
+  logger.info(`${logPrefix} initializing KubeObjectMenuRegistry`);
   initializers.initKubeObjectMenuRegistry();
-  initializers.intiKubeObjectDetailRegistry();
+
+  logger.info(`${logPrefix} initializing KubeObjectDetailRegistry`);
+  initializers.initKubeObjectDetailRegistry();
+
+  logger.info(`${logPrefix} initializing WelcomeMenuRegistry`);
   initializers.initWelcomeMenuRegistry();
+
+  logger.info(`${logPrefix} initializing WorkloadsOverviewDetailRegistry`);
   initializers.initWorkloadsOverviewDetailRegistry();
+
+  logger.info(`${logPrefix} initializing CatalogEntityDetailRegistry`);
   initializers.initCatalogEntityDetailRegistry();
+
+  logger.info(`${logPrefix} initializing CatalogCategoryRegistryEntries`);
   initializers.initCatalogCategoryRegistryEntries();
+
+  logger.info(`${logPrefix} initializing Catalog`);
   initializers.initCatalog();
+
+  logger.info(`${logPrefix} initializing IpcRendererListeners`);
   initializers.initIpcRendererListeners();
+
+  logger.info(`${logPrefix} initializing StatusBarRegistry`);
+  initializers.initStatusBarRegistry();
 
   ExtensionLoader.createInstance().init();
   ExtensionDiscovery.createInstance().init();
 
-  UserStore.createInstance();
-
-  SentryInit();
-
   // ClusterStore depends on: UserStore
-  const cs = ClusterStore.createInstance();
+  const clusterStore = ClusterStore.createInstance();
 
-  await cs.loadInitialOnRenderer();
+  await clusterStore.loadInitialOnRenderer();
 
   // HotbarStore depends on: ClusterStore
   HotbarStore.createInstance();
   ExtensionsStore.createInstance();
   FilesystemProvisionerStore.createInstance();
-
-  // define Monaco Editor themes
-  const { base, ...params } = cloudsMidnight;
-  const baseTheme = base as monaco.editor.BuiltinTheme;
-
-  monaco.editor.defineTheme("clouds-midnight", {base: baseTheme, ...params});
 
   // ThemeStore depends on: UserStore
   ThemeStore.createInstance();
@@ -121,20 +146,34 @@ export async function bootstrap(App: AppComponent) {
   HelmRepoManager.createInstance(); // initialize the manager
 
   // Register additional store listeners
-  cs.registerIpcListener();
+  clusterStore.registerIpcListener();
 
   // init app's dependencies if any
-  if (App.init) {
-    await App.init(rootElem);
-  }
-  render(<>
-    {isMac && <div id="draggable-top" />}
-    {DefaultProps(App)}
-  </>, rootElem);
+  const App = await comp();
+
+  await App.init(rootElem);
+
+  render(
+    <DiContextProvider value={{ di }}>
+      {isMac && <div id="draggable-top" />}
+
+      {DefaultProps(App)}
+    </DiContextProvider>,
+
+    rootElem,
+  );
 }
 
+const di = getDi();
+
 // run
-bootstrap(process.isMainFrame ? LensApp : App);
+bootstrap(
+  async () =>
+    process.isMainFrame
+      ? (await import("./root-frame")).RootFrame
+      : (await import("./cluster-frame")).ClusterFrame,
+  di,
+);
 
 
 /**

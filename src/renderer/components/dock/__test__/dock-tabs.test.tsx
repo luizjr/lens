@@ -23,34 +23,37 @@ import React from "react";
 import { fireEvent, render } from "@testing-library/react";
 import "@testing-library/jest-dom/extend-expect";
 import fse from "fs-extra";
-
 import { DockTabs } from "../dock-tabs";
 import { dockStore, DockTab, TabKind } from "../dock.store";
 import { noop } from "../../../utils";
 import { ThemeStore } from "../../../theme.store";
 import { TerminalStore } from "../terminal.store";
 import { UserStore } from "../../../../common/user-store";
-
-jest.mock("react-monaco-editor", () => ({
-  monaco: {
-    editor: {
-      getModel: jest.fn()
-    }
-  },
-}));
+import { AppPaths } from "../../../../common/app-paths";
 
 jest.mock("electron", () => ({
   app: {
+    getVersion: () => "99.99.99",
+    getName: () => "lens",
+    setName: jest.fn(),
+    setPath: jest.fn(),
     getPath: () => "tmp",
+    getLocale: () => "en",
+    setLoginItemSettings: jest.fn(),
+  },
+  ipcMain: {
+    on: jest.fn(),
+    handle: jest.fn(),
   },
 }));
+AppPaths.init();
 
 const initialTabs: DockTab[] = [
-  { id: "terminal", kind: TabKind.TERMINAL, title: "Terminal", pinned: false, },
-  { id: "create", kind: TabKind.CREATE_RESOURCE, title: "Create resource", pinned: false, },
-  { id: "edit", kind: TabKind.EDIT_RESOURCE, title: "Edit resource", pinned: false, },
-  { id: "install", kind: TabKind.INSTALL_CHART, title: "Install chart", pinned: false, },
-  { id: "logs", kind: TabKind.POD_LOGS, title: "Logs", pinned: false, },
+  { id: "terminal", kind: TabKind.TERMINAL, title: "Terminal", pinned: false },
+  { id: "create", kind: TabKind.CREATE_RESOURCE, title: "Create resource", pinned: false },
+  { id: "edit", kind: TabKind.EDIT_RESOURCE, title: "Edit resource", pinned: false },
+  { id: "install", kind: TabKind.INSTALL_CHART, title: "Install chart", pinned: false },
+  { id: "logs", kind: TabKind.POD_LOGS, title: "Logs", pinned: false },
 ];
 
 const getComponent = () => (
@@ -117,7 +120,7 @@ describe("<DockTabs />", () => {
       TabKind.CREATE_RESOURCE,
       TabKind.EDIT_RESOURCE,
       TabKind.INSTALL_CHART,
-      TabKind.POD_LOGS
+      TabKind.POD_LOGS,
     ]);
   });
 
@@ -158,7 +161,7 @@ describe("<DockTabs />", () => {
     rerender(getComponent());
 
     expect(getTabKinds()).toEqual(
-      initialTabs.slice(0, 4).map(tab => tab.kind)
+      initialTabs.slice(0, 4).map(tab => tab.kind),
     );
   });
 
@@ -179,8 +182,8 @@ describe("<DockTabs />", () => {
 
   it("disables 'Close To The Right' item if last tab clicked", () => {
     dockStore.tabs = [
-      { id: "terminal", kind: TabKind.TERMINAL, title: "Terminal", pinned: false, },
-      { id: "logs", kind: TabKind.POD_LOGS, title: "Pod Logs", pinned: false, },
+      { id: "terminal", kind: TabKind.TERMINAL, title: "Terminal", pinned: false },
+      { id: "logs", kind: TabKind.POD_LOGS, title: "Pod Logs", pinned: false },
     ];
     const { container, getByText } = renderTabs();
     const tab = container.querySelectorAll(".Tab")[1];

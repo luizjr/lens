@@ -19,15 +19,6 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-const logger = {
-  silly: jest.fn(),
-  debug: jest.fn(),
-  log: jest.fn(),
-  info: jest.fn(),
-  error: jest.fn(),
-  crit: jest.fn(),
-};
-
 jest.mock("winston", () => ({
   format: {
     colorize: jest.fn(),
@@ -35,26 +26,27 @@ jest.mock("winston", () => ({
     simple: jest.fn(),
     label: jest.fn(),
     timestamp: jest.fn(),
-    printf: jest.fn()
+    printf: jest.fn(),
+    padLevels: jest.fn(),
+    ms: jest.fn(),
   },
-  createLogger: jest.fn().mockReturnValue(logger),
+  createLogger: jest.fn().mockReturnValue({
+    silly: jest.fn(),
+    debug: jest.fn(),
+    log: jest.fn(),
+    info: jest.fn(),
+    error: jest.fn(),
+    crit: jest.fn(),
+  }),
   transports: {
     Console: jest.fn(),
     File: jest.fn(),
-  }
-}));
-
-jest.mock("electron", () => ({
-  app: {
-    getPath: () => "tmp",
-    setLoginItemSettings: jest.fn(),
   },
 }));
 
 jest.mock("../../common/ipc");
 jest.mock("child_process");
 jest.mock("tcp-port-used");
-//jest.mock("../utils/get-port");
 
 import { Cluster } from "../cluster";
 import { KubeAuthProxy } from "../kube-auth-proxy";
@@ -63,17 +55,35 @@ import { ChildProcess, spawn } from "child_process";
 import { bundledKubectlPath, Kubectl } from "../kubectl";
 import { mock, MockProxy } from "jest-mock-extended";
 import { waitUntilUsed } from "tcp-port-used";
-import type { Readable } from "stream";
+import { EventEmitter, Readable } from "stream";
 import { UserStore } from "../../common/user-store";
 import { Console } from "console";
 import { stdout, stderr } from "process";
 import mockFs from "mock-fs";
+import { AppPaths } from "../../common/app-paths";
 
 console = new Console(stdout, stderr);
 
 const mockBroadcastIpc = broadcastMessage as jest.MockedFunction<typeof broadcastMessage>;
 const mockSpawn = spawn as jest.MockedFunction<typeof spawn>;
 const mockWaitUntilUsed = waitUntilUsed as jest.MockedFunction<typeof waitUntilUsed>;
+
+jest.mock("electron", () => ({
+  app: {
+    getVersion: () => "99.99.99",
+    getName: () => "lens",
+    setName: jest.fn(),
+    setPath: jest.fn(),
+    getPath: () => "tmp",
+    getLocale: () => "en",
+    setLoginItemSettings: jest.fn(),
+  },
+  ipcMain: {
+    on: jest.fn(),
+    handle: jest.fn(),
+  },
+}));
+AppPaths.init();
 
 describe("kube auth proxy tests", () => {
   beforeEach(() => {
@@ -124,30 +134,73 @@ describe("kube auth proxy tests", () => {
 
   describe("spawn tests", () => {
     let mockedCP: MockProxy<ChildProcess>;
-    let listeners: Record<string, (...args: any[]) => void>;
+    let listeners: EventEmitter;
     let proxy: KubeAuthProxy;
 
     beforeEach(async () => {
       mockedCP = mock<ChildProcess>();
-      listeners = {};
+      listeners = new EventEmitter();
 
       jest.spyOn(Kubectl.prototype, "checkBinary").mockReturnValueOnce(Promise.resolve(true));
       jest.spyOn(Kubectl.prototype, "ensureKubectl").mockReturnValueOnce(Promise.resolve(false));
       mockedCP.on.mockImplementation((event: string, listener: (message: any, sendHandle: any) => void): ChildProcess => {
-        listeners[event] = listener;
+        listeners.on(event, listener);
 
         return mockedCP;
       });
       mockedCP.stderr = mock<Readable>();
       mockedCP.stderr.on.mockImplementation((event: string, listener: (message: any, sendHandle: any) => void): Readable => {
-        listeners[`stderr/${event}`] = listener;
+        listeners.on(`stderr/${event}`, listener);
+
+        return mockedCP.stderr;
+      });
+      mockedCP.stderr.off.mockImplementation((event: string, listener: (message: any, sendHandle: any) => void): Readable => {
+        listeners.off(`stderr/${event}`, listener);
+
+        return mockedCP.stderr;
+      });
+      mockedCP.stderr.removeListener.mockImplementation((event: string, listener: (message: any, sendHandle: any) => void): Readable => {
+        listeners.off(`stderr/${event}`, listener);
+
+        return mockedCP.stderr;
+      });
+      mockedCP.stderr.once.mockImplementation((event: string, listener: (message: any, sendHandle: any) => void): Readable => {
+        listeners.once(`stderr/${event}`, listener);
+
+        return mockedCP.stderr;
+      });
+      mockedCP.stderr.removeAllListeners.mockImplementation((event?: string): Readable => {
+        listeners.removeAllListeners(event ?? `stderr/${event}`);
 
         return mockedCP.stderr;
       });
       mockedCP.stdout = mock<Readable>();
       mockedCP.stdout.on.mockImplementation((event: string, listener: (message: any, sendHandle: any) => void): Readable => {
-        listeners[`stdout/${event}`] = listener;
-        listeners[`stdout/${event}`]("Starting to serve on 127.0.0.1:9191");
+        listeners.on(`stdout/${event}`, listener);
+
+        if (event === "data") {
+          listeners.emit("stdout/data", "Starting to serve on 127.0.0.1:9191");
+        }
+
+        return mockedCP.stdout;
+      });
+      mockedCP.stdout.once.mockImplementation((event: string, listener: (message: any, sendHandle: any) => void): Readable => {
+        listeners.once(`stdout/${event}`, listener);
+
+        return mockedCP.stdout;
+      });
+      mockedCP.stdout.off.mockImplementation((event: string, listener: (message: any, sendHandle: any) => void): Readable => {
+        listeners.off(`stdout/${event}`, listener);
+
+        return mockedCP.stdout;
+      });
+      mockedCP.stdout.removeListener.mockImplementation((event: string, listener: (message: any, sendHandle: any) => void): Readable => {
+        listeners.off(`stdout/${event}`, listener);
+
+        return mockedCP.stdout;
+      });
+      mockedCP.stdout.removeAllListeners.mockImplementation((event?: string): Readable => {
+        listeners.removeAllListeners(event ?? `stdout/${event}`);
 
         return mockedCP.stdout;
       });
@@ -165,36 +218,36 @@ describe("kube auth proxy tests", () => {
 
     it("should call spawn and broadcast errors", async () => {
       await proxy.run();
-      listeners["error"]({ message: "foobarbat" });
+      listeners.emit("error", { message: "foobarbat" });
 
-      expect(mockBroadcastIpc).toBeCalledWith("kube-auth:foobar", { data: "foobarbat", error: true });
+      expect(mockBroadcastIpc).toBeCalledWith("cluster:foobar:connection-update", { message: "foobarbat", isError: true });
     });
 
     it("should call spawn and broadcast exit", async () => {
       await proxy.run();
-      listeners["exit"](0);
+      listeners.emit("exit", 0);
 
-      expect(mockBroadcastIpc).toBeCalledWith("kube-auth:foobar", { data: "proxy exited with code: 0", error: false });
+      expect(mockBroadcastIpc).toBeCalledWith("cluster:foobar:connection-update", { message: "proxy exited with code: 0", isError: false });
     });
 
     it("should call spawn and broadcast errors from stderr", async () => {
       await proxy.run();
-      listeners["stderr/data"]("an error");
+      listeners.emit("stderr/data", "an error");
 
-      expect(mockBroadcastIpc).toBeCalledWith("kube-auth:foobar", { data: "an error", error: true });
+      expect(mockBroadcastIpc).toBeCalledWith("cluster:foobar:connection-update", { message: "an error", isError: true });
     });
 
     it("should call spawn and broadcast stdout serving info", async () => {
       await proxy.run();
 
-      expect(mockBroadcastIpc).toBeCalledWith("kube-auth:foobar", { data: "Authentication proxy started\n" });
+      expect(mockBroadcastIpc).toBeCalledWith("cluster:foobar:connection-update", { message: "Authentication proxy started", isError: false });
     });
 
     it("should call spawn and broadcast stdout other info", async () => {
       await proxy.run();
-      listeners["stdout/data"]("some info");
+      listeners.emit("stdout/data", "some info");
 
-      expect(mockBroadcastIpc).toBeCalledWith("kube-auth:foobar", { data: "some info" });
+      expect(mockBroadcastIpc).toBeCalledWith("cluster:foobar:connection-update", { message: "some info", isError: false });
     });
   });
 });

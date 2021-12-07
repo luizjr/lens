@@ -26,7 +26,7 @@ import { Cluster } from "../main/cluster";
 import migrations from "../migrations/cluster-store";
 import logger from "../main/logger";
 import { appEventBus } from "./event-bus";
-import { ipcMainHandle, ipcMainOn, ipcRendererOn, requestMain } from "./ipc";
+import { ipcMainHandle, requestMain } from "./ipc";
 import { disposer, toJS } from "./utils";
 import type { ClusterModel, ClusterId, ClusterState } from "./cluster-types";
 
@@ -37,10 +37,8 @@ export interface ClusterStoreModel {
 const initialStates = "cluster:states";
 
 export class ClusterStore extends BaseStore<ClusterStoreModel> {
-  private static StateChannel = "cluster:state";
-
+  readonly displayName = "ClusterStore";
   clusters = observable.map<ClusterId, Cluster>();
-  removedClusters = observable.map<ClusterId, Cluster>();
 
   protected disposer = disposer();
 
@@ -84,21 +82,13 @@ export class ClusterStore extends BaseStore<ClusterStoreModel> {
     }
   }
 
-  handleStateChange = (event: any, clusterId: string, state: ClusterState) => {
-    logger.silly(`[CLUSTER-STORE]: received push-state at ${location.host} (${webFrame.routingId})`, clusterId, state);
-    this.getById(clusterId)?.setState(state);
-  };
-
   registerIpcListener() {
     logger.info(`[CLUSTER-STORE] start to listen (${webFrame.routingId})`);
+    const ipc = ipcMain ?? ipcRenderer;
 
-    if (ipcMain) {
-      this.disposer.push(ipcMainOn(ClusterStore.StateChannel, this.handleStateChange));
-    }
-
-    if (ipcRenderer) {
-      this.disposer.push(ipcRendererOn(ClusterStore.StateChannel, this.handleStateChange));
-    }
+    ipc?.on("cluster:state", (event, clusterId: ClusterId, state: ClusterState) => {
+      this.getById(clusterId)?.setState(state);
+    });
   }
 
   unregisterIpcListener() {
@@ -144,7 +134,6 @@ export class ClusterStore extends BaseStore<ClusterStoreModel> {
   protected fromStore({ clusters = [] }: ClusterStoreModel = {}) {
     const currentClusters = new Map(this.clusters);
     const newClusters = new Map<ClusterId, Cluster>();
-    const removedClusters = new Map<ClusterId, Cluster>();
 
     // update new clusters
     for (const clusterModel of clusters) {
@@ -162,15 +151,7 @@ export class ClusterStore extends BaseStore<ClusterStoreModel> {
       }
     }
 
-    // update removed clusters
-    currentClusters.forEach(cluster => {
-      if (!newClusters.has(cluster.id)) {
-        removedClusters.set(cluster.id, cluster);
-      }
-    });
-
     this.clusters.replace(newClusters);
-    this.removedClusters.replace(removedClusters);
   }
 
   toJSON(): ClusterStoreModel {

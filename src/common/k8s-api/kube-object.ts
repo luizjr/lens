@@ -27,9 +27,9 @@ import { autoBind, formatDuration } from "../utils";
 import type { ItemObject } from "../item.store";
 import { apiKube } from "./index";
 import type { JsonApiParams } from "./json-api";
-import { resourceApplierApi } from "./endpoints/resource-applier.api";
+import * as resourceApplierApi from "./endpoints/resource-applier.api";
 import { hasOptionalProperty, hasTypedProperty, isObject, isString, bindPredicate, isTypedArray, isRecord } from "../../common/utils/type-narrowing";
-import _ from "lodash";
+import type { Patch } from "rfc6902";
 
 export type KubeObjectConstructor<K extends KubeObject> = (new (data: KubeJsonApiData | any) => K) & {
   kind?: string;
@@ -98,9 +98,44 @@ export interface KubeObjectStatus {
 
 export type KubeMetaField = keyof KubeObjectMetadata;
 
+export class KubeCreationError extends Error {
+  constructor(message: string, public data: any) {
+    super(message);
+  }
+}
+
+export type LabelMatchExpression = {
+  /**
+   * The label key that the selector applies to.
+   */
+  key: string;
+} & (
+  {
+    /**
+     * This represents the key's relationship to a set of values.
+     */
+    operator: "Exists" | "DoesNotExist";
+    values?: undefined;
+  }
+  |
+  {
+    operator: "In" | "NotIn";
+    /**
+     * The set of values for to match according to the operator for the label.
+     */
+    values: string[];
+  }
+);
+
+export interface LabelSelector {
+  matchLabels?: Record<string, string | undefined>;
+  matchExpressions?: LabelMatchExpression[];
+}
+
 export class KubeObject<Metadata extends KubeObjectMetadata = KubeObjectMetadata, Status = any, Spec = any> implements ItemObject {
-  static readonly kind: string;
-  static readonly namespaced: boolean;
+  static readonly kind?: string;
+  static readonly namespaced?: boolean;
+  static readonly apiBase?: string;
 
   apiVersion: string;
   kind: string;
@@ -191,18 +226,32 @@ export class KubeObject<Metadata extends KubeObjectMetadata = KubeObjectMetadata
     return Object.entries(labels).map(([name, value]) => `${name}=${value}`);
   }
 
-  protected static readonly nonEditableFields = [
-    "apiVersion",
-    "kind",
-    "metadata.name",
-    "metadata.selfLink",
-    "metadata.resourceVersion",
-    "metadata.uid",
-    "managedFields",
-    "status",
+  /**
+   * These must be RFC6902 compliant paths
+   */
+  private static readonly nonEditablePathPrefixes = [
+    "/metadata/managedFields",
+    "/status",
   ];
+  private static readonly nonEditablePaths = new Set([
+    "/apiVersion",
+    "/kind",
+    "/metadata/name",
+    "/metadata/selfLink",
+    "/metadata/resourceVersion",
+    "/metadata/uid",
+    ...KubeObject.nonEditablePathPrefixes,
+  ]);
 
   constructor(data: KubeJsonApiData) {
+    if (typeof data !== "object") {
+      throw new TypeError(`Cannot create a KubeObject from ${typeof data}`);
+    }
+
+    if (!data.metadata || typeof data.metadata !== "object") {
+      throw new KubeCreationError(`Cannot create a KubeObject from an object without metadata`, data);
+    }
+
     Object.assign(this, data);
     autoBind(this);
   }
@@ -264,7 +313,7 @@ export class KubeObject<Metadata extends KubeObjectMetadata = KubeObjectMetadata
   }
 
   getOwnerRefs() {
-    const refs = this.metadata?.ownerReferences || [];
+    const refs = this.metadata.ownerReferences || [];
     const namespace = this.getNs();
 
     return refs.map(ownerRef => ({ ...ownerRef, namespace }));
@@ -286,20 +335,45 @@ export class KubeObject<Metadata extends KubeObjectMetadata = KubeObjectMetadata
     return JSON.parse(JSON.stringify(this));
   }
 
-  // use unified resource-applier api for updating all k8s objects
-  async update(data: Partial<this>): Promise<KubeJsonApiData | null> {
-    for (const field of KubeObject.nonEditableFields) {
-      if (!_.isEqual(_.get(this, field), _.get(data, field))) {
-        throw new Error(`Failed to update Kube Object: ${field} has been modified`);
+  /**
+   * @deprecated use KubeApi.patch instead
+   */
+  async patch(patch: Patch): Promise<KubeJsonApiData | null> {
+    for (const op of patch) {
+      if (KubeObject.nonEditablePaths.has(op.path)) {
+        throw new Error(`Failed to update ${this.kind}: JSON pointer ${op.path} has been modified`);
+      }
+
+      for (const pathPrefix of KubeObject.nonEditablePathPrefixes) {
+        if (op.path.startsWith(`${pathPrefix}/`)) {
+          throw new Error(`Failed to update ${this.kind}: Child JSON pointer of ${op.path} has been modified`);
+        }
       }
     }
 
+    return resourceApplierApi.patch(this.getName(), this.kind, this.getNs(), patch);
+  }
+
+  /**
+   * Perform a full update (or more specifically a replace)
+   *
+   * Note: this is brittle if `data` is not actually partial (but instead whole).
+   * As fields such as `resourceVersion` will probably out of date. This is a
+   * common race condition.
+   *
+   * @deprecated use KubeApi.update instead
+   */
+  async update(data: Partial<this>): Promise<KubeJsonApiData | null> {
+    // use unified resource-applier api for updating all k8s objects
     return resourceApplierApi.update({
       ...this.toPlainObject(),
       ...data,
     });
   }
 
+  /**
+   * @deprecated use KubeApi.delete instead
+   */
   delete(params?: JsonApiParams) {
     return apiKube.del(this.selfLink, params);
   }

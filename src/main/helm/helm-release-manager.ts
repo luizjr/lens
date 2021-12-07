@@ -22,7 +22,7 @@
 import * as tempy from "tempy";
 import fse from "fs-extra";
 import * as yaml from "js-yaml";
-import { promiseExec } from "../promise-exec";
+import { promiseExec } from "../../common/utils/promise-exec";
 import { helmCli } from "./helm-cli";
 import type { Cluster } from "../cluster";
 import { toCamelCase } from "../../common/utils/camelCase";
@@ -43,8 +43,8 @@ export async function listReleases(pathToKubeconfig: string, namespace?: string)
     });
 
     return output;
-  } catch ({ stderr }) {
-    throw stderr;
+  } catch (error) {
+    throw error?.stderr || error;
   }
 }
 
@@ -53,7 +53,7 @@ export async function installChart(chart: string, values: any, name: string | un
   const helm = await helmCli.binaryPath();
   const fileName = tempy.file({ name: "values.yaml" });
 
-  await fse.writeFile(fileName, yaml.safeDump(values));
+  await fse.writeFile(fileName, yaml.dump(values));
 
   try {
     let generateName = "";
@@ -69,11 +69,11 @@ export async function installChart(chart: string, values: any, name: string | un
       log: stdout,
       release: {
         name: releaseName,
-        namespace
-      }
+        namespace,
+      },
     };
-  } catch ({ stderr }) {
-    throw stderr;
+  } catch (error) {
+    throw error?.stderr || error;
   } finally {
     await fse.unlink(fileName);
   }
@@ -83,7 +83,7 @@ export async function upgradeRelease(name: string, chart: string, values: any, n
   const helm = await helmCli.binaryPath();
   const fileName = tempy.file({ name: "values.yaml" });
 
-  await fse.writeFile(fileName, yaml.safeDump(values));
+  await fse.writeFile(fileName, yaml.dump(values));
 
   try {
     const proxyKubeconfig = await cluster.getProxyKubeconfigPath();
@@ -91,10 +91,10 @@ export async function upgradeRelease(name: string, chart: string, values: any, n
 
     return {
       log: stdout,
-      release: getRelease(name, namespace, cluster)
+      release: getRelease(name, namespace, cluster),
     };
-  } catch ({ stderr }) {
-    throw stderr;
+  } catch (error) {
+    throw error?.stderr || error;
   } finally {
     await fse.unlink(fileName);
   }
@@ -105,14 +105,16 @@ export async function getRelease(name: string, namespace: string, cluster: Clust
     const helm = await helmCli.binaryPath();
     const proxyKubeconfig = await cluster.getProxyKubeconfigPath();
 
-    const { stdout } = await promiseExec(`"${helm}" status ${name} --output json --namespace ${namespace} --kubeconfig ${proxyKubeconfig}`);
+    const { stdout } = await promiseExec(`"${helm}" status ${name} --output json --namespace ${namespace} --kubeconfig ${proxyKubeconfig}`, {
+      maxBuffer: 32 * 1024 * 1024 * 1024, // 32 MiB
+    });
     const release = JSON.parse(stdout);
 
     release.resources = await getResources(name, namespace, cluster);
 
     return release;
-  } catch ({ stderr }) {
-    throw stderr;
+  } catch (error) {
+    throw error?.stderr || error;
   }
 }
 
@@ -122,8 +124,8 @@ export async function deleteRelease(name: string, namespace: string, pathToKubec
     const { stdout } = await promiseExec(`"${helm}" delete ${name} --namespace ${namespace} --kubeconfig ${pathToKubeconfig}`);
 
     return stdout;
-  } catch ({ stderr }) {
-    throw stderr;
+  } catch (error) {
+    throw error?.stderr || error;
   }
 }
 
@@ -139,8 +141,8 @@ export async function getValues(name: string, { namespace, all = false, pathToKu
     const { stdout } = await promiseExec(`"${helm}" get values ${name} ${all ? "--all" : ""} --output yaml --namespace ${namespace} --kubeconfig ${pathToKubeconfig}`);
 
     return stdout;
-  } catch ({ stderr }) {
-    throw stderr;
+  } catch (error) {
+    throw error?.stderr || error;
   }
 }
 
@@ -150,8 +152,8 @@ export async function getHistory(name: string, namespace: string, pathToKubeconf
     const { stdout } = await promiseExec(`"${helm}" history ${name} --output json --namespace ${namespace} --kubeconfig ${pathToKubeconfig}`);
 
     return JSON.parse(stdout);
-  } catch ({ stderr }) {
-    throw stderr;
+  } catch (error) {
+    throw error?.stderr || error;
   }
 }
 
@@ -161,8 +163,8 @@ export async function rollback(name: string, namespace: string, revision: number
     const { stdout } = await promiseExec(`"${helm}" rollback ${name} ${revision} --namespace ${namespace} --kubeconfig ${pathToKubeconfig}`);
 
     return stdout;
-  } catch ({ stderr }) {
-    throw stderr;
+  } catch (error) {
+    throw error?.stderr || error;
   }
 }
 

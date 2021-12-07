@@ -25,7 +25,6 @@ import { DockTabStore } from "./dock-tab.store";
 import { getReleaseValues, HelmRelease } from "../../../common/k8s-api/endpoints/helm-releases.api";
 import { releaseStore } from "../+apps-releases/release.store";
 import { iter } from "../../utils";
-import { monacoModelsManager } from "./monaco-model-manager";
 
 export interface IChartUpgradeData {
   releaseName: string;
@@ -43,7 +42,7 @@ export class UpgradeChartStore extends DockTabStore<IChartUpgradeData> {
 
   constructor() {
     super({
-      storageKey: "chart_releases"
+      storageKey: "chart_releases",
     });
 
     makeObservable(this);
@@ -108,7 +107,7 @@ export class UpgradeChartStore extends DockTabStore<IChartUpgradeData> {
 
     await Promise.all([
       !releaseStore.isLoaded && releaseStore.loadFromContextNamespaces(),
-      !values && this.loadValues(tabId)
+      !values && this.loadValues(tabId),
     ]);
   }
 
@@ -119,7 +118,6 @@ export class UpgradeChartStore extends DockTabStore<IChartUpgradeData> {
     const values = await getReleaseValues(releaseName, releaseNamespace, true);
 
     this.values.setData(tabId, values);
-    monacoModelsManager.getModel(tabId).setValue(values);
   }
 
   getTabByRelease(releaseName: string): DockTab {
@@ -146,7 +144,7 @@ export function createUpgradeChartTab(release: HelmRelease, tabParams: DockTabCr
 
     upgradeChartStore.setData(tab.id, {
       releaseName: release.getName(),
-      releaseNamespace: release.getNs()
+      releaseNamespace: release.getNs(),
     });
   }
 

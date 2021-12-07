@@ -25,6 +25,7 @@ import { podsStore } from "../+workloads-pods/pods.store";
 
 import { IPodContainer, Pod } from "../../../common/k8s-api/endpoints";
 import type { WorkloadKubeObject } from "../../../common/k8s-api/workload-kube-object";
+import logger from "../../../common/logger";
 import { DockTabStore } from "./dock-tab.store";
 import { dockStore, DockTabCreateSpecific, TabKind } from "./dock.store";
 
@@ -48,23 +49,21 @@ interface WorkloadLogsTabData {
 export class LogTabStore extends DockTabStore<LogTabData> {
   constructor() {
     super({
-      storageKey: "pod_logs"
+      storageKey: "pod_logs",
     });
 
-    reaction(() => podsStore.items.length, () => {
-      this.updateTabsData();
-    });
+    reaction(() => podsStore.items.length, () => this.updateTabsData());
   }
 
-  createPodTab({ selectedPod, selectedContainer }: PodLogsTabData): void {
+  createPodTab({ selectedPod, selectedContainer }: PodLogsTabData): string {
     const podOwner = selectedPod.getOwnerRefs()[0];
     const pods = podsStore.getPodsByOwnerId(podOwner?.uid);
     const title = `Pod ${selectedPod.getName()}`;
 
-    this.createLogsTab(title, {
+    return this.createLogsTab(title, {
       pods: pods.length ? pods : [selectedPod],
       selectedPod,
-      selectedContainer
+      selectedContainer,
     });
   }
 
@@ -80,7 +79,7 @@ export class LogTabStore extends DockTabStore<LogTabData> {
     this.createLogsTab(title, {
       pods,
       selectedPod,
-      selectedContainer
+      selectedContainer,
     });
   }
 
@@ -95,49 +94,56 @@ export class LogTabStore extends DockTabStore<LogTabData> {
       ...tabParams,
       kind: TabKind.POD_LOGS,
     }, false);
-  }
+  } 
 
-  private createLogsTab(title: string, data: LogTabData) {
+  private createLogsTab(title: string, data: LogTabData): string {
     const id = uniqueId("log-tab-");
 
     this.createDockTab({ id, title });
     this.setData(id, {
       ...data,
       showTimestamps: false,
-      previous: false
+      previous: false,
     });
+
+    return id;
   }
 
-  private async updateTabsData() {
-    const promises: Promise<void>[] = [];
-
+  private updateTabsData() {
     for (const [tabId, tabData] of this.data) {
-      const pod = new Pod(tabData.selectedPod);
-      const pods = podsStore.getPodsByOwnerId(pod.getOwnerRefs()[0]?.uid);
-      const isSelectedPodInList = pods.find(item => item.getId() == pod.getId());
-      const selectedPod = isSelectedPodInList ? pod : pods[0];
-      const selectedContainer = isSelectedPodInList ? tabData.selectedContainer : pod.getAllContainers()[0];
+      try {
+        if (!tabData.selectedPod) {
+          tabData.selectedPod = tabData.pods[0];
+        }
 
-      if (pods.length) {
-        this.setData(tabId, {
-          ...tabData,
-          selectedPod,
-          selectedContainer,
-          pods
-        });
-
-        this.renameTab(tabId);
-      } else {
-        promises.push(this.closeTab(tabId));
+        const pod = new Pod(tabData.selectedPod);
+        const pods = podsStore.getPodsByOwnerId(pod.getOwnerRefs()[0]?.uid);
+        const isSelectedPodInList = pods.find(item => item.getId() == pod.getId());
+        const selectedPod = isSelectedPodInList ? pod : pods[0];
+        const selectedContainer = isSelectedPodInList ? tabData.selectedContainer : pod.getAllContainers()[0];
+  
+        if (pods.length > 0) {
+          this.setData(tabId, {
+            ...tabData,
+            selectedPod,
+            selectedContainer,
+            pods,
+          });
+  
+          this.renameTab(tabId);
+        } else {
+          this.closeTab(tabId);
+        }
+      } catch (error) {
+        logger.error(`[LOG-TAB-STORE]: failed to set data for tabId=${tabId} deleting`, error);
+        this.data.delete(tabId);
       }
     }
-
-    await Promise.all(promises);
   }
 
-  private async closeTab(tabId: string) {
+  private closeTab(tabId: string) {
     this.clearData(tabId);
-    await dockStore.closeTab(tabId);
+    dockStore.closeTab(tabId);
   }
 }
 

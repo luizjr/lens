@@ -21,13 +21,13 @@
 
 // Main process
 
-import "../common/system-ca";
+import { injectSystemCAs } from "../common/system-ca";
 import { initialize as initializeRemote } from "@electron/remote/main";
 import * as Mobx from "mobx";
 import * as LensExtensionsCommonApi from "../extensions/common-api";
 import * as LensExtensionsMainApi from "../extensions/main-api";
 import { app, autoUpdater, dialog, powerMonitor } from "electron";
-import { appName, isIntegrationTesting, isMac, productName } from "../common/vars";
+import { appName, isIntegrationTesting, isMac, isWindows, productName } from "../common/vars";
 import { LensProxy } from "./lens-proxy";
 import { WindowManager } from "./window-manager";
 import { ClusterManager } from "./cluster-manager";
@@ -63,16 +63,18 @@ import { ensureDir } from "fs-extra";
 import { Router } from "./router";
 import { initMenu } from "./menu";
 import { initTray } from "./tray";
-import * as path from "path";
-import { kubeApiRequest, shellApiRequest } from "./proxy-functions";
+import { kubeApiRequest, shellApiRequest, ShellRequestAuthenticator } from "./proxy-functions";
+import { AppPaths } from "../common/app-paths";
+import { ShellSession } from "./shell-session/shell-session";
+
+injectSystemCAs();
 
 const onCloseCleanup = disposer();
 const onQuitCleanup = disposer();
 
-const workingDir = path.join(app.getPath("appData"), appName);
-
 SentryInit();
 app.setName(appName);
+
 
 logger.info(`📟 Setting ${productName} as protocol client for lens://`);
 
@@ -82,25 +84,28 @@ if (app.setAsDefaultProtocolClient("lens")) {
   logger.info("📟 Protocol client register failed ❗");
 }
 
-if (process.env.CICD) {
-  app.setPath("appData", process.env.CICD);
-  app.setPath("userData", path.join(process.env.CICD, appName));
-} else {
-  app.setPath("userData", workingDir);
-}
+AppPaths.init();
 
 if (process.env.LENS_DISABLE_GPU) {
   app.disableHardwareAcceleration();
 }
 
+logger.debug("[APP-MAIN] initializing remote");
 initializeRemote();
+
+logger.debug("[APP-MAIN] configuring packages");
 configurePackages();
+
 mangleProxyEnv();
+
+logger.debug("[APP-MAIN] initializing ipc main handlers");
 initializers.initIpcMainHandlers();
 
 if (app.commandLine.getSwitchValue("proxy-server") !== "") {
   process.env.HTTPS_PROXY = app.commandLine.getSwitchValue("proxy-server");
 }
+
+logger.debug("[APP-MAIN] Lens protocol routing main");
 
 if (!app.requestSingleInstanceLock()) {
   app.exit();
@@ -115,6 +120,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on("second-instance", (event, argv) => {
+  logger.debug("second-instance message");
+
   const lprm = LensProtocolRouterMain.createInstance();
 
   for (const arg of argv) {
@@ -127,19 +134,18 @@ app.on("second-instance", (event, argv) => {
 });
 
 app.on("ready", async () => {
-  logger.info(`🚀 Starting ${productName} from "${app.getPath("exe")}"`);
+  logger.info(`🚀 Starting ${productName} from "${AppPaths.get("exe")}"`);
   logger.info("🐚 Syncing shell environment");
   await shellSync();
 
   bindBroadcastHandlers();
 
-  powerMonitor.on("shutdown", () => {
-    app.exit();
-  });
+  powerMonitor.on("shutdown", () => app.exit());
 
   registerFileProtocol("static", __static);
 
   PrometheusProviderRegistry.createInstance();
+  ShellRequestAuthenticator.createInstance().init();
   initializers.initPrometheusProviderRegistry();
 
   /**
@@ -183,7 +189,8 @@ app.on("ready", async () => {
     await lensProxy.listen();
   } catch (error) {
     dialog.showErrorBox("Lens Error", `Could not start proxy: ${error?.message || "unknown error"}`);
-    app.exit();
+
+    return app.exit();
   }
 
   // test proxy connection
@@ -193,13 +200,27 @@ app.on("ready", async () => {
 
     if (getAppVersion() !== versionFromProxy) {
       logger.error("Proxy server responded with invalid response");
-      app.exit();
-    } else {
-      logger.info("⚡ LensProxy connection OK");
+
+      return app.exit();
     }
+
+    logger.info("⚡ LensProxy connection OK");
   } catch (error) {
     logger.error(`🛑 LensProxy: failed connection test: ${error}`);
-    app.exit();
+
+    const hostsPath = isWindows
+      ? "C:\\windows\\system32\\drivers\\etc\\hosts"
+      : "/etc/hosts";
+    const message = [
+      `Failed connection test: ${error}`,
+      "Check to make sure that no other versions of Lens are running",
+      `Check ${hostsPath} to make sure that it is clean and that the localhost loopback is at the top and set to 127.0.0.1`,
+      "If you have HTTP_PROXY or http_proxy set in your environment, make sure that the localhost and the ipv4 loopback address 127.0.0.1 are added to the NO_PROXY environment variable.",
+    ];
+
+    dialog.showErrorBox("Lens Proxy Error", message.join("\n\n"));
+
+    return app.exit();
   }
 
   initializers.initRegistries();
@@ -218,6 +239,7 @@ app.on("ready", async () => {
   onQuitCleanup.push(
     initMenu(windowManager),
     initTray(windowManager),
+    () => ShellSession.cleanup(),
   );
 
   installDeveloperTools();
@@ -277,9 +299,14 @@ app.on("activate", (event, hasVisibleWindows) => {
  */
 let blockQuit = !isIntegrationTesting;
 
-autoUpdater.on("before-quit-for-update", () => blockQuit = false);
+autoUpdater.on("before-quit-for-update", () => {
+  logger.debug("Unblocking quit for update");
+  blockQuit = false;
+});
 
 app.on("will-quit", (event) => {
+  logger.debug("will-quit message");
+
   // This is called when the close button of the main window is clicked
 
   const lprm = LensProtocolRouterMain.getInstance(false);
@@ -309,6 +336,8 @@ app.on("will-quit", (event) => {
 });
 
 app.on("open-url", (event, rawUrl) => {
+  logger.debug("open-url message");
+
   // lens:// protocol handler
   event.preventDefault();
   LensProtocolRouterMain.getInstance().route(rawUrl);
@@ -328,3 +357,5 @@ export {
   Mobx,
   LensExtensions,
 };
+
+logger.debug("[APP-MAIN] waiting for 'ready' and other messages");

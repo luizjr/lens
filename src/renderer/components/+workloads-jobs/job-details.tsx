@@ -23,7 +23,7 @@ import "./job-details.scss";
 
 import React from "react";
 import kebabCase from "lodash/kebabCase";
-import { observer } from "mobx-react";
+import { disposeOnUnmount, observer } from "mobx-react";
 import { DrawerItem } from "../drawer";
 import { Badge } from "../badge";
 import { PodDetailsStatuses } from "../+workloads-pods/pod-details-statuses";
@@ -36,7 +36,7 @@ import type { KubeObjectDetailsProps } from "../kube-object-details";
 import { getMetricsForJobs, IPodMetrics, Job } from "../../../common/k8s-api/endpoints";
 import { PodDetailsList } from "../+workloads-pods/pod-details-list";
 import { KubeObjectMeta } from "../kube-object-meta";
-import { makeObservable, observable } from "mobx";
+import { makeObservable, observable, reaction } from "mobx";
 import { podMetricTabs, PodCharts } from "../+workloads-pods/pod-charts";
 import { ClusterMetricsResourceType } from "../../../common/cluster-types";
 import { getActiveClusterEntity } from "../../api/catalog-entity-registry";
@@ -44,6 +44,8 @@ import { ResourceMetrics } from "../resource-metrics";
 import { boundMethod } from "autobind-decorator";
 import { getDetailsUrl } from "../kube-detail-params";
 import { apiManager } from "../../../common/k8s-api/api-manager";
+import logger from "../../../common/logger";
+import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
 
 interface Props extends KubeObjectDetailsProps<Job> {
 }
@@ -57,8 +59,15 @@ export class JobDetails extends React.Component<Props> {
     makeObservable(this);
   }
 
-  async componentDidMount() {
-    podsStore.reloadAll();
+  componentDidMount() {
+    disposeOnUnmount(this, [
+      reaction(() => this.props.object, () => {
+        this.metrics = null;
+      }),
+      kubeWatchApi.subscribeStores([
+        podsStore,
+      ]),
+    ]);
   }
 
   @boundMethod
@@ -71,7 +80,16 @@ export class JobDetails extends React.Component<Props> {
   render() {
     const { object: job } = this.props;
 
-    if (!job) return null;
+    if (!job) {
+      return null;
+    }
+
+    if (!(job instanceof Job)) {
+      logger.error("[JobDetails]: passed object that is not an instanceof Job", job);
+
+      return null;
+    }
+
     const selectors = job.getSelectors();
     const nodeSelector = job.getNodeSelectors();
     const images = job.getImages();

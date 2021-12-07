@@ -19,10 +19,10 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import "./cluster-issues.scss";
+import styles from "./cluster-issues.module.css";
 
 import React from "react";
-import { disposeOnUnmount, observer } from "mobx-react";
+import { observer } from "mobx-react";
 import { computed, makeObservable } from "mobx";
 import { Icon } from "../icon";
 import { SubHeader } from "../layout/sub-header";
@@ -34,7 +34,6 @@ import type { ItemObject } from "../../../common/item.store";
 import { Spinner } from "../spinner";
 import { ThemeStore } from "../../theme.store";
 import { kubeSelectedUrlParam, toggleDetails } from "../kube-detail-params";
-import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
 import { apiManager } from "../../../common/k8s-api/api-manager";
 
 interface Props {
@@ -66,10 +65,6 @@ export class ClusterIssues extends React.Component<Props> {
   constructor(props: Props) {
     super(props);
     makeObservable(this);
-
-    disposeOnUnmount(this, [
-      kubeWatchApi.subscribeStores([eventStore, nodesStore])
-    ]);
   }
 
   @computed get warnings() {
@@ -126,10 +121,10 @@ export class ClusterIssues extends React.Component<Props> {
         selected={selfLink === kubeSelectedUrlParam.get()}
         onClick={prevDefault(() => toggleDetails(selfLink))}
       >
-        <TableCell className="message">
+        <TableCell className={styles.message}>
           {message}
         </TableCell>
-        <TableCell className="object">
+        <TableCell className={styles.object}>
           {getName()}
         </TableCell>
         <TableCell className="kind">
@@ -153,8 +148,8 @@ export class ClusterIssues extends React.Component<Props> {
 
     if (!warnings.length) {
       return (
-        <div className="no-issues flex column box grow gaps align-center justify-center">
-          <div><Icon material="check" big sticker/></div>
+        <div className={cssNames(styles.noIssues, "flex column box grow gaps align-center justify-center")}>
+          <div><Icon className={styles.allGood} material="check" big sticker/></div>
           <div className="ok-title">No issues found</div>
           <span>Everything is fine in the Cluster</span>
         </div>
@@ -163,7 +158,7 @@ export class ClusterIssues extends React.Component<Props> {
 
     return (
       <>
-        <SubHeader>
+        <SubHeader className={styles.SubHeader}>
           <Icon material="error_outline"/>{" "}
           <>Warnings: {warnings.length}</>
         </SubHeader>
@@ -191,7 +186,7 @@ export class ClusterIssues extends React.Component<Props> {
 
   render() {
     return (
-      <div className={cssNames("ClusterIssues flex column", this.props.className)}>
+      <div className={cssNames(styles.ClusterIssues, "flex column", this.props.className)}>
         {this.renderContent()}
       </div>
     );

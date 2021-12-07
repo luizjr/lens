@@ -23,17 +23,20 @@ import path from "path";
 import Config from "conf";
 import type { Options as ConfOptions } from "conf/dist/source/types";
 import { ipcMain, ipcRenderer } from "electron";
-import { IReactionOptions, makeObservable, reaction, runInAction } from "mobx";
+import { IEqualsComparer, makeObservable, reaction, runInAction } from "mobx";
 import { getAppVersion, Singleton, toJS, Disposer } from "./utils";
 import logger from "../main/logger";
 import { broadcastMessage, ipcMainOn, ipcRendererOn } from "./ipc";
 import isEqual from "lodash/isEqual";
 import { isTestEnv } from "./vars";
 import { kebabCase } from "lodash";
-import { getPath } from "./utils/getPath";
+import { AppPaths } from "./app-paths";
 
 export interface BaseStoreParams<T> extends ConfOptions<T> {
-  syncOptions?: IReactionOptions;
+  syncOptions?: {
+    fireImmediately?: boolean;
+    equals?: IEqualsComparer<T>;
+  };
 }
 
 /**
@@ -43,15 +46,25 @@ export abstract class BaseStore<T> extends Singleton {
   protected storeConfig?: Config<T>;
   protected syncDisposers: Disposer[] = [];
 
+  readonly displayName: string = this.constructor.name;
+
   protected constructor(protected params: BaseStoreParams<T>) {
     super();
     makeObservable(this);
+
+    if (ipcRenderer) {
+      params.migrations = undefined; // don't run migrations on renderer
+    }
   }
 
   /**
    * This must be called after the last child's constructor is finished (or just before it finishes)
    */
   load() {
+    if (!isTestEnv) {
+      logger.info(`[${kebabCase(this.displayName).toUpperCase()}]: LOADING from ${this.path} ...`);
+    }
+
     this.storeConfig = new Config({
       ...this.params,
       projectName: "lens",
@@ -62,13 +75,13 @@ export abstract class BaseStore<T> extends Singleton {
     const res: any = this.fromStore(this.storeConfig.store);
 
     if (res instanceof Promise || (typeof res === "object" && res && typeof res.then === "function")) {
-      console.error(`${this.constructor.name} extends BaseStore<T>'s fromStore method returns a Promise or promise-like object. This is an error and must be fixed.`);
+      console.error(`${this.displayName} extends BaseStore<T>'s fromStore method returns a Promise or promise-like object. This is an error and must be fixed.`);
     }
 
     this.enableSync();
 
     if (!isTestEnv) {
-      logger.info(`[${kebabCase(this.constructor.name).toUpperCase()}]: LOADED from ${this.path}`);
+      logger.info(`[${kebabCase(this.displayName).toUpperCase()}]: LOADED from ${this.path}`);
     }
   }
 
@@ -89,10 +102,10 @@ export abstract class BaseStore<T> extends Singleton {
   }
 
   protected cwd() {
-    return getPath("userData");
+    return AppPaths.get("userData");
   }
 
-  protected async saveToFile(model: T) {
+  protected saveToFile(model: T) {
     logger.info(`[STORE]: SAVING ${this.path}`);
 
     // todo: update when fixed https://github.com/sindresorhus/conf/issues/114
@@ -156,7 +169,7 @@ export abstract class BaseStore<T> extends Singleton {
     }
   }
 
-  protected async onModelChange(model: T) {
+  protected onModelChange(model: T) {
     if (ipcMain) {
       this.saveToFile(model); // save config file
       broadcastMessage(this.syncRendererChannel, model);

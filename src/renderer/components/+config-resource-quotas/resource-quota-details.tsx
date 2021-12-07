@@ -26,10 +26,11 @@ import { observer } from "mobx-react";
 import { DrawerItem, DrawerTitle } from "../drawer";
 import { cpuUnitsToNumber, cssNames, unitsToBytes, metricUnitsToNumber } from "../../utils";
 import type { KubeObjectDetailsProps } from "../kube-object-details";
-import type { ResourceQuota } from "../../../common/k8s-api/endpoints/resource-quota.api";
+import { ResourceQuota } from "../../../common/k8s-api/endpoints/resource-quota.api";
 import { LineProgress } from "../line-progress";
 import { Table, TableCell, TableHead, TableRow } from "../table";
 import { KubeObjectMeta } from "../kube-object-meta";
+import logger from "../../../common/logger";
 
 interface Props extends KubeObjectDetailsProps<ResourceQuota> {
 }
@@ -47,7 +48,7 @@ function transformUnit(name: string, value: string): number {
 }
 
 function renderQuotas(quota: ResourceQuota): JSX.Element[] {
-  const { hard = {}, used = {} } = quota.status;
+  const { hard = {}, used = {}} = quota.status;
 
   return Object.entries(hard)
     .filter(([name]) => used[name])
@@ -77,7 +78,15 @@ export class ResourceQuotaDetails extends React.Component<Props> {
   render() {
     const { object: quota } = this.props;
 
-    if (!quota) return null;
+    if (!quota) {
+      return null;
+    }
+
+    if (!(quota instanceof ResourceQuota)) {
+      logger.error("[ResourceQuotaDetails]: passed object that is not an instanceof ResourceQuota", quota);
+
+      return null;
+    }
 
     return (
       <div className="ResourceQuotaDetails">

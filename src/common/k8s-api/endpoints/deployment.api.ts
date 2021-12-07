@@ -28,6 +28,7 @@ import { metricsApi } from "./metrics.api";
 import type { IPodMetrics } from "./pods.api";
 import type { KubeJsonApiData } from "../kube-json-api";
 import { isClusterPageContext } from "../../utils/cluster-id-url-parsing";
+import type { LabelSelector } from "../kube-object";
 
 export class DeploymentApi extends KubeApi<Deployment> {
   protected getScaleApiUrl(params: { namespace: string; name: string }) {
@@ -44,14 +45,14 @@ export class DeploymentApi extends KubeApi<Deployment> {
     return this.request.patch(this.getScaleApiUrl(params), {
       data: {
         spec: {
-          replicas
-        }
-      }
+          replicas,
+        },
+      },
     },
     {
       headers: {
-        "content-type": "application/merge-patch+json"
-      }
+        "content-type": "application/merge-patch+json",
+      },
     });
   }
 
@@ -61,16 +62,16 @@ export class DeploymentApi extends KubeApi<Deployment> {
         spec: {
           template: {
             metadata: {
-              annotations: {"kubectl.kubernetes.io/restartedAt" : moment.utc().format()}
-            }
-          }
-        }
-      }
+              annotations: { "kubectl.kubernetes.io/restartedAt" : moment.utc().format() },
+            },
+          },
+        },
+      },
     },
     {
       headers: {
-        "content-type": "application/strategic-merge-patch+json"
-      }
+        "content-type": "application/strategic-merge-patch+json",
+      },
     });
   }
 }
@@ -83,6 +84,8 @@ export function getMetricsForDeployments(deployments: Deployment[], namespace: s
     cpuUsage: opts,
     memoryUsage: opts,
     fsUsage: opts,
+    fsWrites: opts,
+    fsReads: opts,
     networkReceive: opts,
     networkTransmit: opts,
   }, {
@@ -122,7 +125,7 @@ export class Deployment extends WorkloadKubeObject {
 
   declare spec: {
     replicas: number;
-    selector: { matchLabels: { [app: string]: string } };
+    selector: LabelSelector;
     template: {
       metadata: {
         creationTimestamp?: string;
@@ -246,5 +249,5 @@ if (isClusterPageContext()) {
 }
 
 export {
-  deploymentApi
+  deploymentApi,
 };

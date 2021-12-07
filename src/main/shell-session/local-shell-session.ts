@@ -40,7 +40,7 @@ export class LocalShellSession extends ShellSession {
     const shell = env.PTYSHELL;
     const args = await this.getShellArgs(shell);
 
-    super.open(env.PTYSHELL, args, env);
+    await this.openShellProcess(env.PTYSHELL, args, env);
   }
 
   protected async getShellArgs(shell: string): Promise<string[]> {
@@ -50,7 +50,7 @@ export class LocalShellSession extends ShellSession {
 
     switch(path.basename(shell)) {
       case "powershell.exe":
-        return ["-NoExit", "-command", `& {Set-Location $Env:USERPROFILE; $Env:PATH="${helmpath};${kubectlPathDir};$Env:PATH"}`];
+        return ["-NoExit", "-command", `& {$Env:PATH="${helmpath};${kubectlPathDir};$Env:PATH"}`];
       case "bash":
         return ["--init-file", path.join(await this.kubectlBinDirP, ".bash_set_path")];
       case "fish":

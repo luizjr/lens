@@ -58,8 +58,8 @@ export class CatalogCategoryRegistry {
       iter.reduce(
         this.filters,
         iter.filter,
-        this.items,
-      )
+        this.items.values(),
+      ),
     );
   }
 

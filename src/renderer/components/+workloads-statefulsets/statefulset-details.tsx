@@ -40,6 +40,8 @@ import { KubeObjectMeta } from "../kube-object-meta";
 import { getActiveClusterEntity } from "../../api/catalog-entity-registry";
 import { ClusterMetricsResourceType } from "../../../common/cluster-types";
 import { boundMethod } from "../../utils";
+import logger from "../../../common/logger";
+import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
 
 interface Props extends KubeObjectDetailsProps<StatefulSet> {
 }
@@ -53,13 +55,15 @@ export class StatefulSetDetails extends React.Component<Props> {
     makeObservable(this);
   }
 
-  @disposeOnUnmount
-  clean = reaction(() => this.props.object, () => {
-    this.metrics = null;
-  });
-
   componentDidMount() {
-    podsStore.reloadAll();
+    disposeOnUnmount(this, [
+      reaction(() => this.props.object, () => {
+        this.metrics = null;
+      }),
+      kubeWatchApi.subscribeStores([
+        podsStore,
+      ]),
+    ]);
   }
 
   @boundMethod
@@ -72,7 +76,16 @@ export class StatefulSetDetails extends React.Component<Props> {
   render() {
     const { object: statefulSet } = this.props;
 
-    if (!statefulSet) return null;
+    if (!statefulSet) {
+      return null;
+    }
+
+    if (!(statefulSet instanceof StatefulSet)) {
+      logger.error("[StatefulSetDetails]: passed object that is not an instanceof StatefulSet", statefulSet);
+
+      return null;
+    }
+
     const images = statefulSet.getImages();
     const selectors = statefulSet.getSelectors();
     const nodeSelector = statefulSet.getNodeSelectors();

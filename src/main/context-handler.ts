@@ -29,12 +29,24 @@ import { CoreV1Api } from "@kubernetes/client-node";
 import logger from "./logger";
 import { KubeAuthProxy } from "./kube-auth-proxy";
 
+export interface PrometheusDetails {
+  prometheusPath: string;
+  provider: PrometheusProvider;
+}
+
+interface PrometheusServicePreferences {
+  namespace: string;
+  service: string;
+  port: number;
+  prefix: string;
+}
+
 export class ContextHandler {
   public clusterUrl: UrlWithStringQuery;
   protected kubeAuthProxy?: KubeAuthProxy;
   protected apiTarget?: httpProxy.ServerOptions;
   protected prometheusProvider?: string;
-  protected prometheusPath: string | null;
+  protected prometheus?: PrometheusServicePreferences;
 
   constructor(protected cluster: Cluster) {
     this.clusterUrl = url.parse(cluster.apiUrl);
@@ -43,32 +55,24 @@ export class ContextHandler {
 
   public setupPrometheus(preferences: ClusterPrometheusPreferences = {}) {
     this.prometheusProvider = preferences.prometheusProvider?.type;
-    this.prometheusPath = null;
-
-    if (preferences.prometheus) {
-      const { namespace, service, port } = preferences.prometheus;
-
-      this.prometheusPath = `${namespace}/services/${service}:${port}`;
-    }
+    this.prometheus = preferences.prometheus || null;
   }
 
-  protected async resolvePrometheusPath(): Promise<string> {
-    const prometheusService = await this.getPrometheusService();
+  public async getPrometheusDetails(): Promise<PrometheusDetails> {
+    const service = await this.getPrometheusService();
+    const prometheusPath = this.ensurePrometheusPath(service);
+    const provider = this.ensurePrometheusProvider(service);
 
-    if (!prometheusService) return null;
-    const { service, namespace, port } = prometheusService;
+    return { prometheusPath, provider };
+  }
 
+  protected ensurePrometheusPath({ service, namespace, port }: PrometheusService): string {
     return `${namespace}/services/${service}:${port}`;
   }
 
-  async getPrometheusProvider() {
+  protected ensurePrometheusProvider(service: PrometheusService): PrometheusProvider {
     if (!this.prometheusProvider) {
-      const service = await this.getPrometheusService();
-
-      if (!service) {
-        return null;
-      }
-      logger.info(`using ${service.id} as prometheus provider`);
+      logger.info(`[CONTEXT-HANDLER]: using ${service.id} as prometheus provider for clusterId=${this.cluster.id}`);
       this.prometheusProvider = service.id;
     }
 
@@ -77,44 +81,56 @@ export class ContextHandler {
 
   protected listPotentialProviders(): PrometheusProvider[] {
     const registry = PrometheusProviderRegistry.getInstance();
+    const provider = this.prometheusProvider && registry.getByKind(this.prometheusProvider);
 
-    if (typeof this.prometheusProvider === "string") {
-      return [registry.getByKind(this.prometheusProvider)];
+    if (provider) {
+      return [provider];
     }
 
     return Array.from(registry.providers.values());
   }
 
-  async getPrometheusService(): Promise<PrometheusService | undefined> {
+  protected async getPrometheusService(): Promise<PrometheusService> {
+    if (this.prometheus !== null && this.prometheusProvider !== null) {
+      return {
+        id: this.prometheusProvider,
+        namespace: this.prometheus.namespace,
+        service: this.prometheus.service,
+        port: this.prometheus.port,
+      };
+    }
+
     const providers = this.listPotentialProviders();
     const proxyConfig = await this.cluster.getProxyKubeconfig();
     const apiClient = proxyConfig.makeApiClient(CoreV1Api);
     const potentialServices = await Promise.allSettled(
-      providers.map(provider => provider.getPrometheusService(apiClient))
+      providers.map(provider => provider.getPrometheusService(apiClient)),
     );
+    const errors: any[] = [];
 
-    for (const result of potentialServices) {
-      if (result.status === "fulfilled" && result.value) {
-        return result.value;
+    for (const res of potentialServices) {
+      switch (res.status) {
+        case "rejected":
+          if (res.reason) {
+            errors.push(String(res.reason));
+          }
+          break;
+
+        case "fulfilled":
+          if (res.value) {
+            return res.value;
+          }
       }
     }
 
-    return undefined;
-  }
-
-  async getPrometheusPath(): Promise<string> {
-    if (!this.prometheusPath) {
-      this.prometheusPath = await this.resolvePrometheusPath();
-    }
-
-    return this.prometheusPath;
+    throw Object.assign(new Error("No Prometheus service found"), { cause: errors });
   }
 
   async resolveAuthProxyUrl() {
     await this.ensureServer();
     const path = this.clusterUrl.path !== "/" ? this.clusterUrl.path : "";
 
-    return `http://127.0.0.1:${this.kubeAuthProxy.port}${path}`;
+    return `http://127.0.0.1:${this.kubeAuthProxy.port}${this.kubeAuthProxy.apiPrefix}${path}`;
   }
 
   async getApiTarget(isLongRunningRequest = false): Promise<httpProxy.ServerOptions> {
@@ -146,7 +162,7 @@ export class ContextHandler {
         proxyEnv.HTTPS_PROXY = this.cluster.preferences.httpsProxy;
       }
       this.kubeAuthProxy = new KubeAuthProxy(this.cluster, proxyEnv);
-      this.kubeAuthProxy.run();
+      await this.kubeAuthProxy.run();
     }
 
     await this.kubeAuthProxy.whenReady;
@@ -156,9 +172,5 @@ export class ContextHandler {
     this.kubeAuthProxy?.exit();
     this.kubeAuthProxy = undefined;
     this.apiTarget = undefined;
-  }
-
-  get proxyLastError(): string {
-    return this.kubeAuthProxy?.lastError || "";
   }
 }

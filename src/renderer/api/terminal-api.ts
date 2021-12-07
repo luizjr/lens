@@ -19,21 +19,38 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import { boundMethod, base64, EventEmitter } from "../utils";
-import { WebSocketApi } from "./websocket-api";
+import { getHostedClusterId } from "../utils";
+import { WebSocketApi, WebSocketEvents } from "./websocket-api";
 import isEqual from "lodash/isEqual";
-import { isDevelopment } from "../../common/vars";
 import url from "url";
 import { makeObservable, observable } from "mobx";
-import type { ParsedUrlQueryInput } from "querystring";
+import { ipcRenderer } from "electron";
+import logger from "../../common/logger";
+import { deserialize, serialize } from "v8";
+import { once } from "lodash";
 
 export enum TerminalChannels {
-  STDIN = 0,
-  STDOUT = 1,
-  STDERR = 2,
-  TERMINAL_SIZE = 4,
-  TOKEN = 9,
+  STDIN = "stdin",
+  STDOUT = "stdout",
+  CONNECTED = "connected",
+  RESIZE = "resize",
 }
+
+export type TerminalMessage = {
+  type: TerminalChannels.STDIN,
+  data: string,
+} | {
+  type: TerminalChannels.STDOUT,
+  data: string,
+} | {
+  type: TerminalChannels.CONNECTED
+} | {
+  type: TerminalChannels.RESIZE,
+  data: {
+    width: number,
+    height: number,
+  },
+};
 
 enum TerminalColor {
   RED = "\u001b[31m",
@@ -50,96 +67,134 @@ enum TerminalColor {
 export type TerminalApiQuery = Record<string, string> & {
   id: string;
   node?: string;
-  type?: string | "node";
+  type?: string;
 };
 
-export class TerminalApi extends WebSocketApi {
-  protected size: { Width: number; Height: number };
+export interface TerminalEvents extends WebSocketEvents {
+  ready: () => void;
+  connected: () => void;
+}
 
-  public onReady = new EventEmitter<[]>();
+export class TerminalApi extends WebSocketApi<TerminalEvents> {
+  protected size: { width: number; height: number };
+
   @observable public isReady = false;
-  public readonly url: string;
 
-  constructor(protected options: TerminalApiQuery) {
+  constructor(protected query: TerminalApiQuery) {
     super({
-      logging: isDevelopment,
       flushOnOpen: false,
-      pingIntervalSeconds: 30,
+      pingInterval: 30,
     });
     makeObservable(this);
 
-    const { hostname, protocol, port } = location;
-    const query: ParsedUrlQueryInput = {
-      id: options.id,
-    };
+    if (query.node) {
+      query.type ||= "node";
+    }
+  }
 
-    if (options.node) {
-      query.node = options.node;
-      query.type = options.type || "node";
+  async connect() {
+    if (!this.socket) {
+      /**
+       * Only emit this message if we are not "reconnecting", so as to keep the
+       * output display clean when the computer wakes from sleep
+       */
+      this.emitStatus("Connecting ...");
     }
 
-    this.url = url.format({
+    const authTokenArray = await ipcRenderer.invoke("cluster:shell-api", getHostedClusterId(), this.query.id);
+
+    if (!(authTokenArray instanceof Uint8Array)) {
+      throw new TypeError("ShellApi token is not a Uint8Array");
+    }
+
+    const { hostname, protocol, port } = location;
+    const socketUrl = url.format({
       protocol: protocol.includes("https") ? "wss" : "ws",
       hostname,
       port,
       pathname: "/api",
-      query,
+      query: {
+        ...this.query,
+        shellToken: Buffer.from(authTokenArray).toString("base64"),
+      },
       slashes: true,
     });
-  }
 
-  connect() {
-    this.emitStatus("Connecting ...");
-    this.onData.addListener(this._onReady, { prepend: true });
-    super.connect(this.url);
+    const onReady = once((data?: string) => {
+      this.isReady = true;
+      this.emit("ready");
+      this.removeListener("data", onReady);
+      this.removeListener("connected", onReady);
+      this.flush();
+
+      // data is undefined if the event that was handled is "connected"
+      if (data === undefined) {
+        /**
+         * Output the last line, the makes sure that the terminal isn't completely
+         * empty when the user refreshes.
+         */
+        this.emit("data", window.localStorage.getItem(`${this.query.id}:last-data`));
+      }
+    });
+
+    this.prependListener("data", onReady);
+    this.prependListener("connected", onReady);
+
+    super.connect(socketUrl);
+    this.socket.binaryType = "arraybuffer";
   }
 
   destroy() {
     if (!this.socket) return;
-    const exitCode = String.fromCharCode(4); // ctrl+d
+    const controlCode = String.fromCharCode(4); // ctrl+d
 
-    this.sendCommand(exitCode);
+    this.sendMessage({ type: TerminalChannels.STDIN, data: controlCode });
     setTimeout(() => super.destroy(), 2000);
-  }
-
-  removeAllListeners() {
-    super.removeAllListeners();
-    this.onReady.removeAllListeners();
-  }
-
-  @boundMethod
-  protected _onReady(data: string) {
-    if (!data) return true;
-    this.isReady = true;
-    this.onReady.emit();
-    this.onData.removeListener(this._onReady);
-    this.flush();
-    this.onData.emit(data); // re-emit data
-
-    return false; // prevent calling rest of listeners
   }
 
   reconnect() {
     super.reconnect();
   }
 
-  sendCommand(key: string, channel = TerminalChannels.STDIN) {
-    return this.send(channel + base64.encode(key));
+  sendMessage(message: TerminalMessage) {
+    return this.send(serialize(message));
   }
 
   sendTerminalSize(cols: number, rows: number) {
-    const newSize = { Width: cols, Height: rows };
+    const newSize = { width: cols, height: rows };
 
     if (!isEqual(this.size, newSize)) {
-      this.sendCommand(JSON.stringify(newSize), TerminalChannels.TERMINAL_SIZE);
+      this.sendMessage({
+        type: TerminalChannels.RESIZE,
+        data: newSize,
+      });
       this.size = newSize;
     }
   }
 
-  protected parseMessage(data: string) {
-    data = data.substr(1); // skip channel
+  protected _onMessage({ data, ...evt }: MessageEvent<ArrayBuffer>): void {
+    try {
+      const message: TerminalMessage = deserialize(new Uint8Array(data));
 
-    return base64.decode(data);
+      switch (message.type) {
+        case TerminalChannels.STDOUT:
+          /**
+           * save the last data for reconnections. User localStorage because we
+           * don't want this data to survive if the app is closed
+           */
+          window.localStorage.setItem(`${this.query.id}:last-data`, message.data);
+          super._onMessage({ data: message.data, ...evt });
+          break;
+        case TerminalChannels.CONNECTED:
+          this.emit("connected");
+          break;
+        default:
+          logger.warn(`[TERMINAL-API]: unknown or unhandleable message type`, message);
+          break;
+      }
+    } catch (error) {
+      logger.error(`[TERMINAL-API]: failed to handle message`, error);
+    }
   }
 
   protected _onOpen(evt: Event) {
@@ -156,21 +211,18 @@ export class TerminalApi extends WebSocketApi {
 
   protected emitStatus(data: string, options: { color?: TerminalColor; showTime?: boolean } = {}) {
     const { color, showTime } = options;
+    const time = showTime ? `${(new Date()).toLocaleString()} ` : "";
 
     if (color) {
       data = `${color}${data}${TerminalColor.NO_COLOR}`;
     }
-    let time;
 
-    if (showTime) {
-      time = `${(new Date()).toLocaleString()} `;
-    }
-    this.onData.emit(`${showTime ? time : ""}${data}\r\n`);
+    this.emit("data", `${time}${data}\r\n`);
   }
 
   protected emitError(error: string) {
     this.emitStatus(error, {
-      color: TerminalColor.RED
+      color: TerminalColor.RED,
     });
   }
 }

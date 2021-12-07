@@ -19,7 +19,6 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import _ from "lodash";
 import type { LensApiRequest } from "../router";
 import { respondJson } from "../utils/http-responses";
 import type { Cluster } from "../cluster";
@@ -33,8 +32,7 @@ export type IMetricsQuery = string | string[] | {
 };
 
 // This is used for backoff retry tracking.
-const MAX_ATTEMPTS = 5;
-const ATTEMPTS = [...(_.fill(Array(MAX_ATTEMPTS - 1), false)), true];
+const ATTEMPTS = [false, false, false, false, true];
 
 // prometheus metrics loader
 async function loadMetrics(promQueries: string[], cluster: Cluster, prometheusPath: string, queryParams: Record<string, string>): Promise<any[]> {
@@ -48,7 +46,7 @@ async function loadMetrics(promQueries: string[], cluster: Cluster, prometheusPa
           return await getMetrics(cluster, prometheusPath, { query, ...queryParams });
         } catch (error) {
           if (lastAttempt || (error?.statusCode >= 400 && error?.statusCode < 500)) {
-            logger.error("[Metrics]: metrics not available", { error });
+            logger.error("[Metrics]: metrics not available", error);
             throw new Error("Metrics not available");
           }
 
@@ -75,12 +73,9 @@ export class MetricsRoute {
     const prometheusMetadata: ClusterPrometheusMetadata = {};
 
     try {
-      const [prometheusPath, prometheusProvider] = await Promise.all([
-        cluster.contextHandler.getPrometheusPath(),
-        cluster.contextHandler.getPrometheusProvider()
-      ]);
+      const { prometheusPath, provider } = await cluster.contextHandler.getPrometheusDetails();
 
-      prometheusMetadata.provider = prometheusProvider?.id;
+      prometheusMetadata.provider = provider?.id;
       prometheusMetadata.autoDetected = !cluster.preferences.prometheusProvider?.type;
 
       if (!prometheusPath) {
@@ -101,7 +96,7 @@ export class MetricsRoute {
       } else {
         const queries = Object.entries<Record<string, string>>(payload)
           .map(([queryName, queryOpts]) => (
-            prometheusProvider.getQuery(queryOpts, queryName)
+            provider.getQuery(queryOpts, queryName)
           ));
         const result = await loadMetrics(queries, cluster, prometheusPath, queryParams);
         const data = Object.fromEntries(Object.keys(payload).map((metricName, i) => [metricName, result[i]]));
@@ -109,9 +104,10 @@ export class MetricsRoute {
         respondJson(response, data);
       }
       prometheusMetadata.success = true;
-    } catch {
+    } catch (error) {
       prometheusMetadata.success = false;
       respondJson(response, {});
+      logger.warn(`[METRICS-ROUTE]: failed to get metrics for clusterId=${cluster.id}:`, error);
     } finally {
       cluster.metadata[ClusterMetadataKey.PROMETHEUS] = prometheusMetadata;
     }

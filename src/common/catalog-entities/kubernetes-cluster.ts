@@ -23,10 +23,11 @@ import { catalogCategoryRegistry } from "../catalog/catalog-category-registry";
 import { CatalogEntity, CatalogEntityActionContext, CatalogEntityContextMenuContext, CatalogEntityMetadata, CatalogEntityStatus } from "../catalog";
 import { clusterActivateHandler, clusterDisconnectHandler } from "../cluster-ipc";
 import { ClusterStore } from "../cluster-store";
-import { requestMain } from "../ipc";
+import { broadcastMessage, requestMain } from "../ipc";
 import { CatalogCategory, CatalogCategorySpec } from "../catalog";
 import { app } from "electron";
 import type { CatalogEntitySpec } from "../catalog/catalog-entity";
+import { IpcRendererNavigationEvents } from "../../renderer/navigation/events";
 
 export interface KubernetesClusterPrometheusMetrics {
   address?: {
@@ -54,15 +55,24 @@ export interface KubernetesClusterSpec extends CatalogEntitySpec {
   accessibleNamespaces?: string[];
 }
 
+export enum LensKubernetesClusterStatus {
+  DELETING = "deleting",
+  CONNECTING = "connecting",
+  CONNECTED = "connected",
+  DISCONNECTED = "disconnected",
+}
+
 export interface KubernetesClusterMetadata extends CatalogEntityMetadata {
   distro?: string;
   kubeVersion?: string;
 }
 
+/**
+ * @deprecated This is no longer used as it is incorrect. Other sources can add more values
+ */
 export type KubernetesClusterStatusPhase = "connected" | "connecting" | "disconnected" | "deleting";
 
 export interface KubernetesClusterStatus extends CatalogEntityStatus {
-  phase: KubernetesClusterStatusPhase;
 }
 
 export class KubernetesCluster extends CatalogEntity<KubernetesClusterMetadata, KubernetesClusterStatus, KubernetesClusterSpec> {
@@ -104,25 +114,28 @@ export class KubernetesCluster extends CatalogEntity<KubernetesClusterMetadata, 
     if (!this.metadata.source || this.metadata.source === "local") {
       context.menuItems.push({
         title: "Settings",
-        icon: "edit",
-        onClick: () => context.navigate(`/entity/${this.metadata.uid}/settings`)
+        icon: "settings",
+        onClick: () => broadcastMessage(
+          IpcRendererNavigationEvents.NAVIGATE_IN_APP,
+          `/entity/${this.metadata.uid}/settings`,
+        ),
       });
     }
 
     switch (this.status.phase) {
-      case "connected":
-      case "connecting":
+      case LensKubernetesClusterStatus.CONNECTED:
+      case LensKubernetesClusterStatus.CONNECTING:
         context.menuItems.push({
           title: "Disconnect",
           icon: "link_off",
-          onClick: () => requestMain(clusterDisconnectHandler, this.metadata.uid)
+          onClick: () => requestMain(clusterDisconnectHandler, this.metadata.uid),
         });
         break;
-      case "disconnected":
+      case LensKubernetesClusterStatus.DISCONNECTED:
         context.menuItems.push({
           title: "Connect",
           icon: "link",
-          onClick: () => context.navigate(`/cluster/${this.metadata.uid}`)
+          onClick: () => context.navigate(`/cluster/${this.metadata.uid}`),
         });
         break;
     }
@@ -145,12 +158,12 @@ class KubernetesClusterCategory extends CatalogCategory {
     versions: [
       {
         name: "v1alpha1",
-        entityClass: KubernetesCluster
-      }
+        entityClass: KubernetesCluster,
+      },
     ],
     names: {
-      kind: "KubernetesCluster"
-    }
+      kind: "KubernetesCluster",
+    },
   };
 }
 

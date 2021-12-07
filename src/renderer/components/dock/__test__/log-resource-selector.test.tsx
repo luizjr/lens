@@ -31,14 +31,25 @@ import { dockerPod, deploymentPod1 } from "./pod.mock";
 import { ThemeStore } from "../../../theme.store";
 import { UserStore } from "../../../../common/user-store";
 import mockFs from "mock-fs";
-
-jest.mock("react-monaco-editor", () => null);
+import { AppPaths } from "../../../../common/app-paths";
 
 jest.mock("electron", () => ({
   app: {
+    getVersion: () => "99.99.99",
+    getName: () => "lens",
+    setName: jest.fn(),
+    setPath: jest.fn(),
     getPath: () => "tmp",
+    getLocale: () => "en",
+    setLoginItemSettings: jest.fn(),
+  },
+  ipcMain: {
+    on: jest.fn(),
+    handle: jest.fn(),
   },
 }));
+
+AppPaths.init();
 
 const getComponent = (tabData: LogTabData) => {
   return (
@@ -75,7 +86,7 @@ const getFewPodsTabData = (): LogTabData => {
 describe("<LogResourceSelector />", () => {
   beforeEach(() => {
     mockFs({
-      "tmp": {}
+      "tmp": {},
     });
     UserStore.createInstance();
     ThemeStore.createInstance();

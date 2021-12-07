@@ -26,11 +26,11 @@ import { dockStore, DockTab, DockTabCreateSpecific, TabId, TabKind } from "./doc
 import type { KubeObject } from "../../../common/k8s-api/kube-object";
 import { apiManager } from "../../../common/k8s-api/api-manager";
 import type { KubeObjectStore } from "../../../common/k8s-api/kube-object.store";
-import {monacoModelsManager} from "./monaco-model-manager";
 
 export interface EditingResource {
   resource: string; // resource path, e.g. /api/v1/namespaces/default
   draft?: string; // edited draft in yaml
+  firstDraft?: string;
 }
 
 export class EditResourceStore extends DockTabStore<EditingResource> {
@@ -62,7 +62,6 @@ export class EditResourceStore extends DockTabStore<EditingResource> {
             // preload resource for editing
             if (!obj && !store.isLoaded && !store.isLoading && isActiveTab) {
               store.loadFromPath(resource).catch(noop);
-              monacoModelsManager.getModel(tabId).setValue(resource);
             }
             // auto-close tab when resource removed from store
             else if (!obj && store.isLoaded) {
@@ -70,7 +69,7 @@ export class EditResourceStore extends DockTabStore<EditingResource> {
             }
           }
         }, {
-          delay: 100 // make sure all kube-object stores are initialized
+          delay: 100, // make sure all kube-object stores are initialized
         }));
       });
     });
@@ -104,6 +103,10 @@ export class EditResourceStore extends DockTabStore<EditingResource> {
     }) || [];
 
     return dockStore.getTabById(tabId);
+  }
+
+  clearInitialDraft(tabId: TabId): void {
+    delete this.getData(tabId)?.firstDraft;
   }
 
   reset() {

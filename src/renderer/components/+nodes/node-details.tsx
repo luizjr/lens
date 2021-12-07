@@ -30,7 +30,7 @@ import { Badge } from "../badge";
 import { ResourceMetrics } from "../resource-metrics";
 import { podsStore } from "../+workloads-pods/pods.store";
 import type { KubeObjectDetailsProps } from "../kube-object-details";
-import { getMetricsByNodeNames, IClusterMetrics, Node } from "../../../common/k8s-api/endpoints";
+import { formatNodeTaint, getMetricsByNodeNames, IClusterMetrics, Node } from "../../../common/k8s-api/endpoints";
 import { NodeCharts } from "./node-charts";
 import { makeObservable, observable, reaction } from "mobx";
 import { PodDetailsList } from "../+workloads-pods/pod-details-list";
@@ -40,6 +40,8 @@ import { ClusterMetricsResourceType } from "../../../common/cluster-types";
 import { NodeDetailsResources } from "./node-details-resources";
 import { DrawerTitle } from "../drawer/drawer-title";
 import { boundMethod } from "../../utils";
+import logger from "../../../common/logger";
+import { kubeWatchApi } from "../../../common/k8s-api/kube-watch-api";
 
 interface Props extends KubeObjectDetailsProps<Node> {
 }
@@ -53,13 +55,15 @@ export class NodeDetails extends React.Component<Props> {
     makeObservable(this);
   }
 
-  @disposeOnUnmount
-  clean = reaction(() => this.props.object.getName(), () => {
-    this.metrics = null;
-  });
-
-  async componentDidMount() {
-    podsStore.reloadAll();
+  componentDidMount() {
+    disposeOnUnmount(this, [
+      reaction(() => this.props.object.getName(), () => {
+        this.metrics = null;
+      }),
+      kubeWatchApi.subscribeStores([
+        podsStore,
+      ]),
+    ]);
   }
 
   @boundMethod
@@ -72,7 +76,16 @@ export class NodeDetails extends React.Component<Props> {
   render() {
     const { object: node } = this.props;
 
-    if (!node) return null;
+    if (!node) {
+      return null;
+    }
+
+    if (!(node instanceof Node)) {
+      logger.error("[NodeDetails]: passed object that is not an instanceof Node", node);
+
+      return null;
+    }
+
     const { status } = node;
     const { nodeInfo, addresses } = status;
     const conditions = node.getActiveConditions();
@@ -132,11 +145,7 @@ export class NodeDetails extends React.Component<Props> {
         />
         {taints.length > 0 && (
           <DrawerItem name="Taints" labelsOnly>
-            {
-              taints.map(({ key, effect, value }) => (
-                <Badge key={key} label={`${key}=${value}:${effect}`} />
-              ))
-            }
+            {taints.map(taint => <Badge key={taint.key} label={formatNodeTaint(taint)} />)}
           </DrawerItem>
         )}
         {conditions &&
@@ -158,8 +167,8 @@ export class NodeDetails extends React.Component<Props> {
                       <div key={key} className="flex gaps align-center">
                         <div className="name">{upperFirst(key)}</div>
                         <div className="value">{value}</div>
-                      </div>
-                    )
+                      </div>,
+                    ),
                   }}
                 />
               );

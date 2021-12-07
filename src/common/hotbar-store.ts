@@ -35,6 +35,7 @@ export interface HotbarStoreModel {
 }
 
 export class HotbarStore extends BaseStore<HotbarStoreModel> {
+  readonly displayName = "HotbarStore";
   @observable hotbars: Hotbar[] = [];
   @observable private _activeHotbarId: string;
 
@@ -73,8 +74,8 @@ export class HotbarStore extends BaseStore<HotbarStoreModel> {
   protected fromStore(data: Partial<HotbarStoreModel> = {}) {
     if (!data.hotbars || !data.hotbars.length) {
       const hotbar = getEmptyHotbar("Default");
-      const { metadata: { uid, name, source } } = catalogEntity;
-      const initialItem = { entity: { uid, name, source } };
+      const { metadata: { uid, name, source }} = catalogEntity;
+      const initialItem = { entity: { uid, name, source }};
 
       hotbar.items[0] = initialItem;
 
@@ -99,7 +100,7 @@ export class HotbarStore extends BaseStore<HotbarStoreModel> {
   toJSON(): HotbarStoreModel {
     const model: HotbarStoreModel = {
       hotbars: this.hotbars,
-      activeHotbarId: this.activeHotbarId
+      activeHotbarId: this.activeHotbarId,
     };
 
     return toJS(model);
@@ -171,7 +172,7 @@ export class HotbarStore extends BaseStore<HotbarStoreModel> {
     }};
 
 
-    if (hotbar.items.find(i => i?.entity.uid === uid)) {
+    if (this.isAddedToActive(item)) {
       return;
     }
 
@@ -187,7 +188,7 @@ export class HotbarStore extends BaseStore<HotbarStoreModel> {
     } else if (0 <= cellIndex && cellIndex < hotbar.items.length) {
       hotbar.items[cellIndex] = newItem;
     } else {
-      logger.error(`[HOTBAR-STORE]: cannot pin entity to hotbar outside of index range`, { entityId: uid, hotbarId: hotbar.id, cellIndex, });
+      logger.error(`[HOTBAR-STORE]: cannot pin entity to hotbar outside of index range`, { entityId: uid, hotbarId: hotbar.id, cellIndex });
     }
   }
 
@@ -229,6 +230,7 @@ export class HotbarStore extends BaseStore<HotbarStoreModel> {
     return index;
   }
 
+  @action
   restackItems(from: number, to: number): void {
     const { items } = this.getActive();
     const source = items[from];
@@ -273,6 +275,14 @@ export class HotbarStore extends BaseStore<HotbarStoreModel> {
     }
 
     hotbarStore.activeHotbarId = hotbarStore.hotbars[index].id;
+  }
+
+  /**
+   * Checks if entity already pinned to hotbar
+   * @returns boolean
+   */
+  isAddedToActive(entity: CatalogEntity) {
+    return !!this.getActive().items.find(item => item?.entity.uid === entity.metadata.uid);
   }
 }
 

@@ -19,23 +19,35 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+import { jest } from "@jest/globals";
 import { ClusterPageRegistry, getExtensionPageUrl, GlobalPageRegistry, PageParams } from "../page-registry";
 import { LensExtension } from "../../lens-extension";
 import React from "react";
 import fse from "fs-extra";
 import { Console } from "console";
-import { stdout, stderr } from "process";
+import { stderr, stdout } from "process";
+import { TerminalStore } from "../../../renderer/components/dock/terminal.store";
 import { ThemeStore } from "../../../renderer/theme.store";
-import { TerminalStore } from "../../renderer-api/components";
 import { UserStore } from "../../../common/user-store";
-
-jest.mock("react-monaco-editor", () => null);
+import { AppPaths } from "../../../common/app-paths";
 
 jest.mock("electron", () => ({
   app: {
+    getVersion: () => "99.99.99",
+    getName: () => "lens",
+    setName: jest.fn(),
+    setPath: jest.fn(),
     getPath: () => "tmp",
+    getLocale: () => "en",
+    setLoginItemSettings: jest.fn(),
+  },
+  ipcMain: {
+    on: jest.fn(),
+    handle: jest.fn(),
   },
 }));
+
+AppPaths.init();
 
 console = new Console(stdout, stderr);
 
@@ -46,14 +58,14 @@ describe("page registry tests", () => {
     ext = new LensExtension({
       manifest: {
         name: "foo-bar",
-        version: "0.1.1"
+        version: "0.1.1",
       },
       id: "/this/is/fake/package.json",
       absolutePath: "/absolute/fake/",
       manifestPath: "/this/is/fake/package.json",
       isBundled: false,
       isEnabled: true,
-      isCompatible: true
+      isCompatible: true,
     });
     UserStore.createInstance();
     ThemeStore.createInstance();
@@ -62,30 +74,30 @@ describe("page registry tests", () => {
     GlobalPageRegistry.createInstance().add({
       id: "page-with-params",
       components: {
-        Page: () => React.createElement("Page with params")
+        Page: () => React.createElement("Page with params"),
       },
       params: {
         test1: "test1-default",
-        test2: "" // no default value, just declaration
+        test2: "", // no default value, just declaration
       },
     }, ext);
     GlobalPageRegistry.createInstance().add([
       {
         id: "test-page",
         components: {
-          Page: () => React.createElement("Text")
-        }
+          Page: () => React.createElement("Text"),
+        },
       },
       {
         id: "another-page",
         components: {
-          Page: () => React.createElement("Text")
+          Page: () => React.createElement("Text"),
         },
       },
       {
         components: {
-          Page: () => React.createElement("Default")
-        }
+          Page: () => React.createElement("Default"),
+        },
       },
     ], ext);
   });
@@ -155,7 +167,7 @@ describe("page registry tests", () => {
       it("returns matching page", () => {
         const page = GlobalPageRegistry.getInstance().getByPageTarget({
           pageId: "test-page",
-          extensionId: ext.name
+          extensionId: ext.name,
         });
 
         expect(page.id).toEqual("test-page");
@@ -164,7 +176,7 @@ describe("page registry tests", () => {
       it("returns null if target not found", () => {
         const page = GlobalPageRegistry.getInstance().getByPageTarget({
           pageId: "wrong-page",
-          extensionId: ext.name
+          extensionId: ext.name,
         });
 
         expect(page).toBeNull();

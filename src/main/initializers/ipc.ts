@@ -20,18 +20,20 @@
  */
 
 import { BrowserWindow, dialog, IpcMainInvokeEvent } from "electron";
-import { KubernetesCluster } from "../../common/catalog-entities";
 import { clusterFrameMap } from "../../common/cluster-frames";
 import { clusterActivateHandler, clusterSetFrameIdHandler, clusterVisibilityHandler, clusterRefreshHandler, clusterDisconnectHandler, clusterKubectlApplyAllHandler, clusterKubectlDeleteAllHandler, clusterDeleteHandler, clusterSetDeletingHandler, clusterClearDeletingHandler } from "../../common/cluster-ipc";
 import type { ClusterId } from "../../common/cluster-types";
 import { ClusterStore } from "../../common/cluster-store";
 import { appEventBus } from "../../common/event-bus";
-import { dialogShowOpenDialogHandler, ipcMainHandle } from "../../common/ipc";
+import { dialogShowOpenDialogHandler, ipcMainHandle, ipcMainOn } from "../../common/ipc";
 import { catalogEntityRegistry } from "../catalog";
 import { pushCatalogToRenderer } from "../catalog-pusher";
 import { ClusterManager } from "../cluster-manager";
 import { ResourceApplier } from "../resource-applier";
 import { WindowManager } from "../window-manager";
+import path from "path";
+import { remove } from "fs-extra";
+import { AppPaths } from "../../common/app-paths";
 
 export function initIpcMainHandlers() {
   ipcMainHandle(clusterActivateHandler, (event, clusterId: ClusterId, force = false) => {
@@ -51,16 +53,8 @@ export function initIpcMainHandlers() {
     }
   });
 
-  ipcMainHandle(clusterVisibilityHandler, (event: IpcMainInvokeEvent, clusterId: ClusterId, visible: boolean) => {
-    const entity = catalogEntityRegistry.getById(clusterId);
-
-    for (const kubeEntity of catalogEntityRegistry.getItemsByEntityClass(KubernetesCluster)) {
-      kubeEntity.status.active = false;
-    }
-
-    if (entity) {
-      entity.status.active = visible;
-    }
+  ipcMainOn(clusterVisibilityHandler, (event, clusterId?: ClusterId) => {
+    ClusterManager.getInstance().visibleCluster = clusterId;
   });
 
   ipcMainHandle(clusterRefreshHandler, (event, clusterId: ClusterId) => {
@@ -79,9 +73,11 @@ export function initIpcMainHandlers() {
     }
   });
 
-  ipcMainHandle(clusterDeleteHandler, (event, clusterId: ClusterId) => {
+  ipcMainHandle(clusterDeleteHandler, async (event, clusterId: ClusterId) => {
     appEventBus.emit({ name: "cluster", action: "remove" });
-    const cluster = ClusterStore.getInstance().getById(clusterId);
+
+    const clusterStore = ClusterStore.getInstance();
+    const cluster = clusterStore.getById(clusterId);
 
     if (!cluster) {
       return;
@@ -89,6 +85,16 @@ export function initIpcMainHandlers() {
 
     cluster.disconnect();
     clusterFrameMap.delete(cluster.id);
+
+    // Remove from the cluster store as well, this should clear any old settings
+    clusterStore.clusters.delete(cluster.id);
+
+    try {
+      // remove the local storage file
+      const localStorageFilePath = path.resolve(AppPaths.get("userData"), "lens-local-storage", `${cluster.id}.json`);
+
+      await remove(localStorageFilePath);
+    } catch {}
   });
 
   ipcMainHandle(clusterSetDeletingHandler, (event, clusterId: string) => {

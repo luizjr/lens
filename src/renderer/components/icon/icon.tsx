@@ -104,24 +104,24 @@ export class Icon extends React.PureComponent<IconProps> {
     const iconProps: Partial<IconProps> = {
       className: cssNames("Icon", className,
         { svg, material, interactive: isInteractive, disabled, sticker, active, focusable },
-        !size ? { smallest, small, big } : {}
+        !size ? { smallest, small, big } : {},
       ),
       onClick: isInteractive ? this.onClick : undefined,
       onKeyDown: isInteractive ? this.onKeyDown : undefined,
       tabIndex: isInteractive && focusable && !disabled ? 0 : undefined,
       style: size ? { "--size": size + (isNumber(size) ? "px" : "") } as React.CSSProperties : undefined,
-      ...elemProps
+      ...elemProps,
     };
 
     // render as inline svg-icon
-    if (svg) {
+    if (typeof svg === "string") {
       const svgIconText = svg.includes("<svg") ? svg : require(`!!raw-loader!./${svg}.svg`).default;
 
       iconContent = <span className="icon" dangerouslySetInnerHTML={{ __html: svgIconText }}/>;
     }
 
     // render as material-icon
-    if (material) {
+    if (typeof material === "string") {
       iconContent = <span className="icon" data-icon-name={material}>{material}</span>;
     }
 

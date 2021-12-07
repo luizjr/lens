@@ -20,11 +20,13 @@
  */
 
 // Helper for working with storages (e.g. window.localStorage, NodeJS/file-system, etc.)
-
-import { action, comparer, makeObservable, observable, toJS, when, } from "mobx";
-import produce, { Draft } from "immer";
-import { isEqual, isFunction, isPlainObject } from "lodash";
+import { action, comparer, makeObservable, observable, toJS, when } from "mobx";
+import produce, { Draft, isDraft } from "immer";
+import { isEqual, isPlainObject } from "lodash";
 import logger from "../../main/logger";
+import { getHostedClusterId } from "../../common/utils";
+import path from "path";
+import { AppPaths } from "../../common/app-paths";
 
 export interface StorageAdapter<T> {
   [metadata: string]: any;
@@ -41,6 +43,10 @@ export interface StorageHelperOptions<T> {
 }
 
 export class StorageHelper<T> {
+  static async getLocalStoragePath() {
+    return path.resolve(await AppPaths.getAsync("userData"), "lens-local-storage", `${getHostedClusterId() || "app"}.json`);
+  }
+
   static logPrefix = "[StorageHelper]:";
   readonly storage: StorageAdapter<T>;
 
@@ -81,7 +87,7 @@ export class StorageHelper<T> {
     const notDefault = !this.isDefaultValue(data);
 
     if (notEmpty && notDefault) {
-      this.merge(data);
+      this.set(data);
     }
 
     this.initialized = true;
@@ -150,15 +156,24 @@ export class StorageHelper<T> {
 
   @action
   merge(value: Partial<T> | ((draft: Draft<T>) => Partial<T> | void)) {
-    const nextValue = produce(this.toJSON(), (state: Draft<T>) => {
-      const newValue = isFunction(value) ? value(state) : value;
+    const nextValue = produce<T>(this.toJSON(), (draft: Draft<T>) => {
 
-      return isPlainObject(newValue)
-        ? Object.assign(state, newValue) // partial updates for returned plain objects
-        : newValue;
+      if (typeof value == "function") {
+        const newValue = value(draft);
+
+        // merge returned plain objects from `value-as-callback` usage
+        // otherwise `draft` can be just modified inside a callback without returning any value (void)
+        if (newValue && !isDraft(newValue)) {
+          Object.assign(draft, newValue);
+        }
+      } else if (isPlainObject(value)) {
+        Object.assign(draft, value);
+      }
+
+      return draft;
     });
 
-    this.set(nextValue as T);
+    this.set(nextValue);
   }
 
   toJSON(): T {
